@@ -129,6 +129,10 @@ export const NAV = [
   // Safekeeping used to sit here; it is now the Safekeeping tab on the Dashboard.
   { to: '/storage', icon: 'map', label: 'Floor Plan' },
   { to: '/movement', icon: 'incoming', label: 'Movement History', lockedFor: ['procurement', 'site'] },
+  // Deliberately not locked for anyone: the Process Flow module documents how the
+  // system works and who may do what, and every audience named for it — management,
+  // procurement, warehouse, developers, future administrators — needs to read it.
+  { to: '/process-flow', icon: 'flow', label: 'Process Flow' },
   { to: '/users', icon: 'users', label: 'Users', lockedFor: ['warehouse', 'procurement', 'site', 'management'] },
   { to: '/settings', icon: 'settings', label: 'Settings', lockedFor: ['warehouse', 'procurement', 'site', 'management'] },
 ]

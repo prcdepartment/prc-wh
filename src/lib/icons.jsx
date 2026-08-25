@@ -71,6 +71,10 @@ const paths = {
   // which is what tells rebar apart from any other bundled long stock.
   // Drawn to fill x 3..21 and y 3.4..20.9 so its INK is centred in the 24 box — an
   // icon whose artwork sits off-centre throws off the gap to the label beneath it.
+  // Two inputs joining into one output — a flow diagram in miniature. Drawn rather
+  // than borrowed: `layers` reads as stacked data and `reorganize` as moving stock,
+  // and the Process Flow module is about neither.
+  flow: <><rect x="2.5" y="3" width="6.5" height="5" rx="1.5" /><rect x="2.5" y="16" width="6.5" height="5" rx="1.5" /><rect x="15" y="9.5" width="6.5" height="5" rx="1.5" /><path d="M9 5.5h3v6.5h3" /><path d="M9 18.5h3V12" /></>,
   rebar: <>
     <path d="M3 9L21 4.5" /><path d="M6.5 6.4v3.4M10.5 5.4v3.4M14.5 4.4v3.4M18.5 3.4v3.4" />
     <path d="M3 14.5L21 10" /><path d="M6.5 11.9v3.4M10.5 10.9v3.4M14.5 9.9v3.4M18.5 8.9v3.4" />

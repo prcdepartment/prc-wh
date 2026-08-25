@@ -23,6 +23,10 @@ const LowStock = lazy(() => import('./pages/LowStock'))
 const PurchaseRequests = lazy(() => import('./pages/PurchaseRequests'))
 const RequestMaterials = lazy(() => import('./pages/RequestMaterials'))
 const DeliveryTracking = lazy(() => import('./pages/DeliveryTracking'))
+// The Process Flow module carries its own stylesheet and the generated system model,
+// so it is split out like every other secondary page — nobody pays for the system
+// documentation while looking at the dashboard.
+const ProcessFlow = lazy(() => import('./pages/ProcessFlow'))
 
 function PageFallback() {
   return <div className="page-loading">Loading…</div>
@@ -62,6 +66,7 @@ export default function App() {
       <Route path="/purchase-requests" element={<Protected><PurchaseRequests /></Protected>} />
       <Route path="/request-materials" element={<Protected><RequestMaterials /></Protected>} />
       <Route path="/delivery" element={<Protected><DeliveryTracking /></Protected>} />
+      <Route path="/process-flow" element={<Protected><ProcessFlow /></Protected>} />
       {/* Safekeeping is now a dashboard tab rather than its own page; the old path is
           kept as a redirect so existing links and bookmarks still land somewhere real. */}
       <Route path="/safekeeping" element={<Navigate to="/dashboard?tab=safekeeping" replace />} />

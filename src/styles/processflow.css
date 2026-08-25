@@ -1,0 +1,751 @@
+/* ============================================================
+   Process Flow module
+   Imported from src/pages/ProcessFlow.jsx so it ships inside that page's own
+   lazy-loaded chunk rather than in the main stylesheet — the same arrangement
+   the floor plan uses.
+
+   Everything here is prefixed .pf-. No rule in this file may target a shared
+   class without scoping it under .pf first.
+   ============================================================ */
+
+/* ---------- status tone variables ----------
+   The four statuses reduce to two custom properties, so every component below
+   styles itself from --tone / --tone-weak and none of them repeats the palette.
+   Add a status in one place (processFlow.js) plus one block here, and every
+   diagram, chip, card edge and dot picks it up.
+
+   Brand red is deliberately absent: it is reserved for the severity marks in the
+   Security view, so a red thing on this page always means "this is a problem"
+   rather than "this is a category". */
+/* TEXT gets --tone-ink; borders, dots, swatches and fills get --tone.
+   They differ because the shared palette's mid-tones were chosen against white for
+   14px+ text, and this module prints a great deal of 10–11px type ON the matching
+   weak tint. Measured in light mode, four of the six pairs fall short of the 4.5:1
+   the small sizes need — the warning yellow on its own tint is 3.4:1, the brand red
+   3.5:1 — so text switches to a darker ink of the same hue while every non-text use
+   keeps the palette colour it always had. A 3px border and an 8px dot are graphics,
+   which need 3:1, and they already clear it.
+
+   Nothing outside .pf is touched: the rest of the app uses these pairs at larger
+   sizes, and re-toning the shared palette is not this module's business. */
+.pf {
+  --ink-ok: #1d6146;
+  --ink-warn: #7a5608;
+  --ink-orange: #8f490e;
+  --ink-danger: #a3161b;
+  --ink-accent: #a3161b;
+  --ink-info: #5a5858;
+  /* --text-faint is 4.3:1 on this module's tinted card surfaces, and most of the
+     captions using it are 10–11px. Darkened for the module only. */
+  --text-faint: #676565;
+}
+/* On the dark theme the palette tones are the light end of the pair and already clear
+   AA against the near-black tints — measured 4.8:1 to 6.8:1 — so ink is the tone. */
+:root[data-theme='dark'] .pf {
+  --ink-ok: var(--ok);
+  --ink-warn: var(--warn);
+  --ink-orange: var(--orange);
+  --ink-danger: var(--danger);
+  --ink-accent: var(--accent);
+  --ink-info: var(--info);
+  --text-faint: #9a9898;
+}
+
+.pf .st-live,
+.pf .tone-ok { --tone: var(--ok); --tone-weak: var(--ok-weak); --tone-ink: var(--ink-ok); }
+.pf .st-partial,
+.pf .tone-warn { --tone: var(--warn); --tone-weak: var(--warn-weak); --tone-ink: var(--ink-warn); }
+.pf .st-planned,
+.pf .tone-neutral,
+.pf .tone-info { --tone: var(--info); --tone-weak: var(--info-weak); --tone-ink: var(--ink-info); }
+.pf .st-recommended,
+.pf .tone-orange { --tone: var(--orange); --tone-weak: var(--orange-weak); --tone-ink: var(--ink-orange); }
+.pf .tone-danger { --tone: var(--danger); --tone-weak: var(--danger-weak); --tone-ink: var(--ink-danger); }
+.pf .tone-accent { --tone: var(--accent); --tone-weak: var(--accent-weak); --tone-ink: var(--ink-accent); }
+
+/* Documentation tables are wide by nature. Scoped to this module so the shared
+   card padding is untouched everywhere else in the app. */
+.pf .card-pad { overflow-x: auto; }
+
+.pf .icon-btn.sm { width: 28px; height: 28px; }
+
+/* ---------- module header ---------- */
+.pf-header { margin-bottom: 12px; }
+.pf-lede {
+  font-size: 14px; line-height: 1.62; color: var(--text); margin: 0;
+  max-width: 78ch;
+}
+.pf-lede b { font-weight: 700; }
+.pf-header-stats {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.pf-header-stats b { color: var(--text); font-weight: 800; font-size: 13px; }
+.pf-header-stats .warn b { color: var(--ink-warn); }
+
+/* ---------- legend ---------- */
+.pf-legend {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  margin-bottom: 12px;
+}
+.pf-legend-item {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--radius); padding: 10px 12px;
+}
+.pf-legend-head { display: flex; align-items: center; gap: 7px; }
+.pf-legend-swatch {
+  width: 10px; height: 10px; border-radius: 3px; background: var(--tone); flex-shrink: 0;
+}
+.pf-legend-label {
+  font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--tone-ink);
+}
+.pf-legend-count {
+  margin-left: auto; font-size: 12px; font-weight: 800; color: var(--text);
+  background: var(--tone-weak); border-radius: 20px; padding: 1px 8px;
+}
+.pf-legend-desc { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+
+/* ---------- controls ---------- */
+.pf-controls {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.pf-search {
+  position: relative; display: flex; align-items: center; gap: 8px; flex: 1 1 320px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0 10px; height: 38px; color: var(--text-muted);
+}
+.pf-search:focus-within { border-color: var(--brand-red); }
+.pf-search input {
+  flex: 1; border: 0; background: transparent; color: var(--text);
+  font-family: inherit; font-size: 13px; outline: none; min-width: 0;
+}
+.pf-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  max-height: 340px; overflow-y: auto;
+}
+.pf-results-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint);
+}
+.pf-result {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 12px; border: 0; background: transparent; text-align: left;
+  color: var(--text); border-bottom: 1px solid var(--border);
+}
+.pf-result:last-child { border-bottom: 0; }
+.pf-result:hover { background: var(--surface-2); }
+.pf-result-main { flex: 1; min-width: 0; }
+.pf-result-label {
+  display: block; font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-result-ctx { display: block; font-size: 10.5px; color: var(--text-faint); }
+
+.pf-filter { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pf-filter-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+  border-radius: 20px; padding: 6px 11px; font-size: 11.5px; font-weight: 700;
+}
+.pf-filter-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.pf-filter-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--text-faint)); }
+.pf-filter-btn.on {
+  background: var(--tone-weak, var(--surface-2)); color: var(--tone-ink, var(--text));
+  border-color: var(--tone, var(--border-strong));
+}
+
+.pf-tabs { margin-bottom: 4px; }
+
+/* ---------- section bar ---------- */
+.pf-sectionbar {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  margin: 18px 0 2px;
+}
+.pf-sectionbar-main { min-width: 0; }
+.pf-sectionbar-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text);
+}
+.pf-sectionbar-note {
+  margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-muted); max-width: 88ch;
+}
+.pf-bulk { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ---------- notes and small type ---------- */
+.pf-note {
+  margin: 0 0 10px; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-width: 92ch;
+}
+.pf-foot {
+  margin: 10px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-faint);
+  border-top: 1px solid var(--border); padding-top: 8px;
+}
+.pf-foot code, .pf-note code { font-family: 'Consolas', monospace; font-size: 11px; color: var(--text-muted); }
+.pf-sub {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); margin: 14px 0 6px;
+}
+.pf-sub.inline { display: block; margin: 0 0 4px; }
+.pf-dim { color: var(--text-faint); }
+.pf-purpose {
+  color: var(--text-muted); font-size: 12px; line-height: 1.45;
+  white-space: normal; min-width: 220px; max-width: 460px;
+}
+.pf-path {
+  font-family: 'Consolas', 'SF Mono', monospace; font-size: 11px;
+  color: var(--text-muted); background: var(--surface-2);
+  border-radius: 4px; padding: 1px 5px; white-space: nowrap;
+}
+.pf-inline-status { display: inline-flex; align-items: center; gap: 6px; }
+.pf-hide-sm { display: inline; }
+
+/* ---------- status chip and dot ---------- */
+.pf-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--tone-weak); color: var(--tone-ink);
+  border-radius: 20px; padding: 3px 9px; font-size: 11px; font-weight: 800;
+  white-space: nowrap;
+}
+.pf-chip.sm { font-size: 10px; padding: 2px 7px; }
+.pf-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pf-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--tone, var(--text-faint));
+  flex-shrink: 0; display: inline-block;
+}
+
+.pf-roll { display: inline-flex; align-items: center; gap: 4px; }
+.pf-roll-item {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--tone-weak); color: var(--tone-ink);
+  border-radius: 20px; padding: 2px 7px; font-size: 11px; font-weight: 800;
+}
+.pf-roll-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ---------- split layout: diagram beside its detail panel ----------
+   The panel is always rendered, even when nothing is selected. If it appeared on
+   click it would take width away from the diagram at the exact moment the reader
+   clicked something in it, and every box would jump. */
+.pf-split { display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.pf-split.wide-side { grid-template-columns: minmax(0, 1fr) 400px; }
+.pf-split-main { min-width: 0; padding: 14px 16px; }
+.pf-split-side {
+  min-width: 0; border-left: 1px solid var(--border); background: var(--surface-2);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  max-height: 720px; overflow-y: auto;
+}
+
+/* ---------- flow diagram ---------- */
+.pf-diagram { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pf-diagram-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.pf-zoom { display: flex; align-items: center; gap: 6px; }
+.pf-zoom-val {
+  font-size: 11px; font-weight: 800; color: var(--text-muted);
+  min-width: 38px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.pf-erd-key { display: flex; gap: 12px; font-size: 10.5px; color: var(--text-faint); }
+.pf-erd-key b { color: var(--text-muted); }
+
+.pf-viewport { overflow: auto; background: var(--bg); cursor: grab; }
+.pf-viewport.dragging { cursor: grabbing; }
+.pf-canvas { position: relative; }
+.pf-canvas-inner { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.pf-edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+
+.pf-edge { fill: none; stroke: var(--border-strong); stroke-width: 1.6; }
+/* A dashed connector into an unbuilt step. Drawing it solid would claim a working
+   link where the chain actually stops. */
+.pf-edge.weak { stroke-dasharray: 5 4; stroke: var(--text-faint); opacity: 0.75; }
+.pf-edge.dim { opacity: 0.16; }
+.pf-arrow-head { fill: var(--border-strong); }
+
+.pf-stage-label {
+  position: absolute; display: flex; align-items: center;
+  font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); padding: 0 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-stage-label.v { justify-content: flex-start; }
+
+.pf-node {
+  position: absolute; display: flex; flex-direction: column; gap: 4px;
+  text-align: left; padding: 8px 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--tone); border-radius: 9px;
+  box-shadow: var(--shadow-sm); color: var(--text);
+  transition: box-shadow 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+  overflow: hidden;
+}
+.pf-node:hover { box-shadow: var(--shadow); border-color: var(--border-strong); }
+.pf-node.selected { border-color: var(--tone-ink); box-shadow: 0 0 0 2px var(--tone-weak), var(--shadow); }
+.pf-node.hit { border-color: var(--brand-red); box-shadow: 0 0 0 2px var(--accent-weak); }
+.pf-node.dim { opacity: 0.28; }
+.pf-node-top { display: flex; align-items: center; gap: 6px; }
+.pf-node-kind { color: var(--text-faint); display: flex; }
+.pf-node-status {
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--tone-ink);
+}
+.pf-node-label {
+  font-size: 12px; font-weight: 600; line-height: 1.32;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* Kind 'gap' is a break in the chain, not a component. It reads as a warning strip
+   rather than as another box the reader can go and open. */
+.pf-node.st-partial .pf-node-kind, .pf-node.st-planned .pf-node-kind { color: var(--tone-ink); }
+
+/* ---------- detail panel ---------- */
+.pf-detail { padding: 14px 16px; }
+.pf-detail.idle {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; text-align: center; color: var(--text-faint); min-height: 200px; padding: 24px 20px;
+}
+.pf-detail.idle p { margin: 0; font-size: 12px; line-height: 1.55; max-width: 30ch; }
+.pf-detail-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.pf-detail-titles { flex: 1; min-width: 0; }
+.pf-detail-kind {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-faint);
+}
+.pf-detail-stage { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.pf-detail-title { margin: 3px 0 0; font-size: 15px; font-weight: 700; line-height: 1.3; }
+.pf-detail-title.mono-title { font-family: 'Consolas', monospace; font-size: 14px; }
+.pf-detail-body { margin: 8px 0 0; font-size: 12.5px; line-height: 1.62; color: var(--text-muted); }
+
+/* The schema's own comment, shown beneath the authored description so a reader can
+   see which sentence came from where. */
+.pf-schema-note {
+  margin-top: 9px; padding: 8px 10px; border-radius: 7px;
+  background: var(--surface); border: 1px dashed var(--border-strong);
+  font-family: 'Consolas', monospace; font-size: 11px; line-height: 1.5; color: var(--text-muted);
+}
+.pf-schema-note .pf-sub { font-family: inherit; }
+
+.pf-missing {
+  margin-top: 10px; padding: 9px 11px; border-radius: 8px;
+  background: var(--tone-weak); border-left: 3px solid var(--tone);
+}
+.pf-missing-head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--tone-ink);
+}
+.pf-missing p { margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--text); }
+
+.pf-evidence { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
+.pf-evidence-head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-faint); margin-bottom: 6px;
+}
+.pf-evidence-row { margin-bottom: 6px; }
+.pf-evidence-row .pf-path { display: inline-block; white-space: normal; word-break: break-all; }
+.pf-evidence-note { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+
+/* ---------- journey: the break-points card ---------- */
+.pf-break-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.pf-break {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--tone); border-radius: var(--radius); padding: 10px 12px;
+}
+.pf-break-head { display: flex; align-items: center; gap: 7px; }
+.pf-break-title { font-size: 12.5px; font-weight: 700; }
+.pf-break-missing { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+.pf-break .pf-evidence { border-top-color: var(--border); }
+
+/* ---------- processes ---------- */
+.pf-proc-right { display: flex; align-items: center; gap: 8px; }
+.pf-proc-summary { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pf-proc-summary p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-width: 92ch; }
+.pf-proc .pf-split { border-top: 0; }
+
+/* ---------- architecture ---------- */
+.pf-layer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.pf-layer-group {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-top: 3px solid var(--tone); border-radius: var(--radius); padding: 10px 12px;
+}
+.pf-layer-head { display: flex; align-items: center; gap: 7px; }
+.pf-layer-title { font-size: 12.5px; font-weight: 700; flex: 1; min-width: 0; }
+.pf-layer-count {
+  font-size: 13px; font-weight: 800; color: var(--tone-ink);
+  background: var(--tone-weak); border-radius: 20px; padding: 1px 9px;
+}
+.pf-layer-detail { margin: 7px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+.pf-layer-more {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 8px;
+  border: 0; background: transparent; color: var(--text-muted);
+  font-family: inherit; font-size: 11px; font-weight: 700; padding: 0;
+}
+.pf-layer-more:hover { color: var(--brand-red); }
+.pf-layer-items { display: flex; flex-direction: column; gap: 3px; margin-top: 7px; }
+.pf-layer-items .pf-path { white-space: normal; word-break: break-all; }
+.pf-layer-gaps { display: grid; gap: 8px; margin-top: 12px; }
+.pf-gap {
+  background: var(--tone-weak); border-left: 3px solid var(--tone);
+  border-radius: 8px; padding: 9px 12px;
+}
+.pf-gap-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700; }
+.pf-gap-head > span:first-of-type { flex: 1; min-width: 0; }
+.pf-gap p { margin: 5px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+
+/* ---------- tables ----------
+   Not table.data: that carries a pointer cursor and a row hover for clickable
+   rows, and most tables here are read, not navigated. */
+.pf-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pf-table thead th {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-strong);
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-faint); white-space: nowrap; background: var(--surface);
+  position: sticky; top: 0; z-index: 1;
+}
+.pf-table tbody td {
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+  vertical-align: top; white-space: nowrap;
+}
+.pf-table tbody tr:last-child td { border-bottom: 0; }
+.pf-table .r { text-align: right; font-variant-numeric: tabular-nums; }
+.pf-table tbody tr.on { background: var(--accent-weak); }
+.pf-table tbody tr[onclick], .pf .pf-table tbody tr { cursor: default; }
+.pf-grp {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  border-radius: 20px; padding: 2px 8px;
+}
+.pf-grp.grp-reference { background: var(--info-weak); color: var(--ink-info); }
+.pf-grp.grp-transactional { background: var(--warn-weak); color: var(--ink-warn); }
+.pf-grp.grp-identity { background: var(--accent-weak); color: var(--ink-accent); }
+.pf-used { font-weight: 800; color: var(--ink-ok); }
+.pf-unused { font-weight: 800; color: var(--ink-danger); }
+
+/* ---------- ERD ---------- */
+.pf-erd-coltitle {
+  position: absolute; font-size: 9.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint); line-height: 1.3;
+}
+.pf-erd-box {
+  position: absolute; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border);
+  border-top: 3px solid var(--tone, var(--border-strong));
+  border-radius: 9px; box-shadow: var(--shadow-sm); overflow: hidden;
+  transition: box-shadow 0.14s ease, border-color 0.14s ease;
+}
+.pf-erd-box.grp-reference { --tone: var(--info); --tone-weak: var(--info-weak); }
+.pf-erd-box.grp-transactional { --tone: var(--warn); --tone-weak: var(--warn-weak); }
+.pf-erd-box.grp-identity { --tone: var(--accent); --tone-weak: var(--accent-weak); }
+.pf-erd-box.external { border-style: dashed; background: var(--surface-2); }
+.pf-erd-box:hover { box-shadow: var(--shadow); border-color: var(--border-strong); }
+.pf-erd-box.selected { box-shadow: 0 0 0 2px var(--tone-weak), var(--shadow); border-color: var(--tone-ink); }
+.pf-erd-box.hit { border-color: var(--brand-red); box-shadow: 0 0 0 2px var(--accent-weak); }
+.pf-erd-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+  background: var(--tone-weak); border-bottom: 1px solid var(--border);
+}
+.pf-erd-name {
+  font-family: 'Consolas', monospace; font-size: 12px; font-weight: 700; color: var(--text);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-erd-grp {
+  font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--tone-ink); flex-shrink: 0;
+}
+.pf-erd-row {
+  display: flex; align-items: center; gap: 5px; padding: 2px 9px;
+  font-size: 10.5px; color: var(--text-muted); height: 17px;
+}
+.pf-erd-row.pk { color: var(--text); font-weight: 700; }
+.pf-erd-row.fk:hover { background: var(--surface-2); }
+.pf-erd-col {
+  font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-erd-type {
+  margin-left: auto; font-size: 9.5px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%;
+}
+.pf-erd-foot {
+  margin-top: auto; padding: 4px 9px 5px; font-size: 9.5px; color: var(--text-faint);
+  border-top: 1px solid var(--border);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-erd-edge path { fill: none; stroke: var(--border-strong); stroke-width: 1.4; }
+.pf-erd-edge text { fill: var(--text-faint); font-size: 11px; font-weight: 800; }
+.pf-erd-edge.on path { stroke: var(--brand-red); stroke-width: 2.2; }
+.pf-erd-edge.on text { fill: var(--brand-red); }
+
+/* ---------- table detail ---------- */
+.pf-tbl-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0;
+  font-size: 11px; color: var(--text-faint);
+}
+.pf-tbl-stats b { color: var(--text); font-weight: 800; }
+.pf-cols { display: flex; flex-direction: column; gap: 2px; }
+.pf-col {
+  display: flex; align-items: baseline; gap: 7px; padding: 4px 7px;
+  border-radius: 5px; font-size: 11px; background: var(--surface);
+}
+.pf-col.pk { background: var(--accent-weak); }
+.pf-col.fk { background: var(--info-weak); }
+.pf-col-name { font-family: 'Consolas', monospace; font-weight: 700; color: var(--text); }
+.pf-col-type { color: var(--text-faint); font-size: 10px; }
+.pf-col-flags { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.pf-flag {
+  font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-faint); background: var(--surface-2); border-radius: 4px; padding: 1px 4px;
+}
+.pf-flag.pk { color: var(--ink-accent); background: var(--accent-weak); }
+.pf-flag.fk { color: var(--ink-info); background: var(--info-weak); text-transform: none; letter-spacing: 0; font-family: 'Consolas', monospace; }
+.pf-flag.chk { color: var(--ink-warn); background: var(--warn-weak); }
+
+.pf-reflist { display: flex; flex-direction: column; gap: 4px; }
+.pf-ref { display: flex; align-items: baseline; gap: 8px; font-size: 11px; flex-wrap: wrap; }
+.pf-ref code { font-family: 'Consolas', monospace; font-weight: 700; color: var(--text); }
+.pf-pol { display: flex; flex-direction: column; gap: 4px; }
+.pf-pol-row { display: flex; align-items: baseline; gap: 7px; font-size: 10.5px; }
+.pf-pol-act {
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+  border-radius: 4px; padding: 1px 5px; flex-shrink: 0;
+  background: var(--surface-2); color: var(--text-muted);
+}
+.pf-pol-act.act-select { background: var(--ok-weak); color: var(--ink-ok); }
+.pf-pol-act.act-insert { background: var(--info-weak); color: var(--ink-info); }
+.pf-pol-act.act-all { background: var(--warn-weak); color: var(--ink-warn); }
+.pf-pol-act.act-update { background: var(--warn-weak); color: var(--ink-warn); }
+.pf-pol-exp {
+  font-family: 'Consolas', monospace; color: var(--text-muted);
+  word-break: break-word; line-height: 1.4;
+}
+
+/* ---------- live probe ---------- */
+.pf-probe-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.pf-probe-title { font-size: 13px; font-weight: 700; }
+.pf-probe-note { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-muted); max-width: 80ch; }
+.pf-probe-summary {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.pf-probe-summary b { color: var(--text); font-weight: 800; font-size: 13px; }
+.pf-probe-summary .bad b { color: var(--ink-danger); }
+.pf-probe-when { margin-left: auto; color: var(--text-faint); }
+.pf-probe-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 5px; margin-top: 10px;
+}
+.pf-probe-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 9px;
+  border-radius: 6px; background: var(--surface-2); font-size: 11px;
+  border-left: 3px solid var(--ok);
+}
+.pf-probe-row.st-missing { border-left-color: var(--danger); }
+.pf-probe-row.st-denied { border-left-color: var(--warn); }
+.pf-probe-name { font-family: 'Consolas', monospace; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pf-probe-count { font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.pf-probe-grp { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.pf-probe-warn {
+  display: flex; align-items: flex-start; gap: 7px; margin-top: 10px;
+  padding: 8px 11px; border-radius: 8px; background: var(--warn-weak);
+  color: var(--text); font-size: 11.5px; line-height: 1.5;
+}
+.pf-probe-warn code { font-family: 'Consolas', monospace; }
+/* The "your zeroes are a permissions result" banner. Red rather than amber because
+   misreading it means concluding the warehouse dataset has been lost. */
+.pf-probe-warn.strong { background: var(--danger-weak); border-left: 3px solid var(--danger); }
+.pf-probe-warn.strong b { color: var(--text); }
+.pf-probe-foot { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-faint); }
+
+/* ---------- data flow traces ---------- */
+.pf-trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pf-trace-step {
+  display: grid; grid-template-columns: 26px 168px minmax(0, 1fr);
+  align-items: baseline; gap: 10px; padding: 7px 9px; border-radius: 7px;
+}
+.pf-trace-step:nth-child(odd) { background: var(--surface-2); }
+.pf-trace-n {
+  font-size: 10px; font-weight: 800; color: var(--text-faint);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 50%; width: 20px; height: 20px; display: grid; place-items: center;
+}
+.pf-trace-label {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.pf-trace-body {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12.5px; line-height: 1.5; color: var(--text);
+}
+.pf-trace-step.st-planned .pf-trace-body { color: var(--text-faint); }
+.pf-trace-step.st-partial .pf-trace-body { color: var(--text-muted); }
+
+/* ---------- access ---------- */
+.pf-truth { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pf-truth-side {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--info); border-radius: var(--radius); padding: 11px 13px;
+}
+.pf-truth-side.strong { border-left-color: var(--brand-red); }
+.pf-truth-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text);
+}
+.pf-truth-side p { margin: 7px 0 8px; font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+
+.pf-role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pf-role-col {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 11px 13px;
+}
+.pf-role-col.db { border-left: 3px solid var(--brand-red); }
+.pf-role-colhead {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-faint); margin-bottom: 8px;
+}
+.pf-role-row {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+}
+.pf-role-row:last-of-type { border-bottom: 0; }
+.pf-role-act { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.pf-role-val { font-size: 12px; line-height: 1.5; color: var(--text); }
+.pf-role-perms { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pf-role-perms .pf-sub { width: 100%; }
+.pf-perm {
+  font-family: 'Consolas', monospace; font-size: 10px; color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+}
+.pf-role-locked {
+  display: flex; align-items: center; gap: 6px; margin-top: 9px;
+  font-size: 11px; color: var(--text-faint);
+}
+.pf-role-gaps { margin-top: 12px; }
+.pf-role-gap {
+  display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; margin-bottom: 5px;
+  background: var(--warn-weak); border-radius: 7px; font-size: 12px; line-height: 1.52; color: var(--text);
+}
+
+.pf-future-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.pf-future {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--orange); border-radius: var(--radius); padding: 12px 14px;
+}
+.pf-future-head { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
+.pf-future-head > span:first-of-type { flex: 1; min-width: 0; }
+.pf-future-why { margin: 8px 0 0; font-size: 12px; line-height: 1.55; color: var(--text-muted); }
+.pf-future-access {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.5; color: var(--text);
+}
+
+/* ---------- security ---------- */
+.pf-sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.pf-sec {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-left: 3px solid var(--tone); border-radius: var(--radius); padding: 10px 12px;
+}
+.pf-sec-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pf-sec-title { font-size: 12.5px; font-weight: 700; flex: 1; min-width: 120px; }
+.pf-sec p { margin: 7px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+
+/* The "this section is publicly readable" notice. Red, because it is the one thing on
+   the page that is about the page itself being a risk. */
+.pf-public-warn {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px; border-radius: var(--radius);
+  background: var(--danger-weak); border-left: 3px solid var(--danger);
+  font-size: 12.5px; line-height: 1.6; color: var(--text);
+}
+.pf-public-warn b { font-weight: 800; }
+.pf-public-warn code { font-family: 'Consolas', monospace; font-size: 11.5px; }
+.pf-public-warn > svg { color: var(--ink-danger); flex-shrink: 0; margin-top: 2px; }
+
+.pf-vuln-right { display: flex; align-items: center; gap: 8px; }
+.pf-sev {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
+  border-radius: 20px; padding: 3px 9px; white-space: nowrap;
+}
+.pf-sev.sev-high { background: var(--danger-weak); color: var(--ink-danger); }
+.pf-sev.sev-medium { background: var(--warn-weak); color: var(--ink-warn); }
+.pf-sev.sev-low { background: var(--info-weak); color: var(--ink-info); }
+.pf-vuln-detail { margin: 0; font-size: 13px; line-height: 1.62; color: var(--text); max-width: 92ch; }
+.pf-vuln-block {
+  margin-top: 10px; padding: 9px 12px; border-radius: 8px; border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+}
+.pf-vuln-block.verify { border-left-color: var(--warn); background: var(--warn-weak); }
+.pf-vuln-block.fix { border-left-color: var(--ok); background: var(--ok-weak); }
+.pf-vuln-block-head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.pf-vuln-block p { margin: 5px 0 0; font-size: 12.5px; line-height: 1.58; color: var(--text); }
+
+/* ---------- kpi row spacing ---------- */
+.pf-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+/* ---------- provenance footer ----------
+   Where the page says what it knows and how. It is the last thing on every view
+   deliberately: a reader who has just been told a system is half-finished is
+   entitled to know which half of that claim was machine-checked. */
+.pf-provenance {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 20px;
+  padding: 12px 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius);
+  background: var(--surface-2); font-size: 11.5px; line-height: 1.6; color: var(--text-muted);
+}
+.pf-provenance code { font-family: 'Consolas', monospace; font-size: 11px; color: var(--text); }
+.pf-provenance b { color: var(--text); }
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 1500px) {
+  .pf-split { grid-template-columns: minmax(0, 1fr) 300px; }
+  .pf-split.wide-side { grid-template-columns: minmax(0, 1fr) 340px; }
+}
+
+@media (max-width: 1200px) {
+  .pf-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Below this the panel is narrower than its own text wants to be, so it goes
+     under the diagram instead of squeezing both. */
+  .pf-split, .pf-split.wide-side { grid-template-columns: minmax(0, 1fr); }
+  .pf-split-side {
+    border-left: 0; border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--radius) var(--radius); max-height: 420px;
+  }
+}
+
+@media (max-width: 900px) {
+  .pf-truth, .pf-role-grid { grid-template-columns: minmax(0, 1fr); }
+  .pf-trace-step { grid-template-columns: 24px minmax(0, 1fr); }
+  /* The step's own name moves above its content rather than beside it: at this
+     width the two-column form left about eight characters for the content. */
+  .pf-trace-label { grid-column: 2; }
+  .pf-trace-body { grid-column: 2; }
+  .pf-trace-n { grid-row: span 2; }
+}
+
+@media (max-width: 760px) {
+  .pf-legend { grid-template-columns: minmax(0, 1fr); }
+  .pf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-controls { flex-direction: column; align-items: stretch; }
+  .pf-search { flex: 1 1 auto; }
+  .pf-filter { justify-content: flex-start; }
+  .pf-hide-sm { display: none; }
+  .pf-sectionbar { flex-direction: column; align-items: stretch; }
+  .pf-role-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .pf-probe-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .pf-split-main { padding: 10px 10px; }
+  .pf-detail { padding: 12px 12px; }
+}
+
+@media (max-width: 520px) {
+  .pf-kpis { grid-template-columns: minmax(0, 1fr); }
+  .pf-lede { font-size: 13px; }
+}

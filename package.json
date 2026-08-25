@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "seed": "node scripts/generate-seeds.mjs"
+    "seed": "node scripts/generate-seeds.mjs",
+    "model": "node scripts/generate-db-model.mjs && node scripts/generate-code-model.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

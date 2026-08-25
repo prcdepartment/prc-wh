@@ -1908,3 +1908,166 @@ does nothing; the checks use `mouseover`/`mouseout`.
 restarts and hard navigations, so `fitSize is not defined` kept reappearing after the
 import had been changed. `curl`-ing the served module and grepping it (0 hits) is what
 settled it. Judge a stale-looking error by the module the server is actually serving.
+
+### 2026-08-25 — Session: new module — Process Flow (system map, generated + authored)
+
+New module at `/process-flow`, in the sidebar for every role (deliberately not locked:
+its stated audience is management, procurement, warehouse, developers and future
+administrators). Eight views held in `?view=` so each is a shareable link and Back works
+between them: Journey, Processes, Architecture, Database, Data Flow, Access, Security,
+Dependencies.
+
+**The one rule the module is built around: nothing may describe a workflow without
+saying whether that workflow actually runs.** Every node, table claim, permission and
+finding carries one of four statuses — `live` / `partial` / `planned` / `recommended` —
+and the legend defining them sits at the top of the module rather than at the foot of a
+card, because every diagram mixes what exists with what does not.
+
+**Half the module is GENERATED, and that is the point.** A hand-maintained table
+catalogue drifts the first time someone adds a column, and documentation that lies is
+worse than none. `npm run model` runs two new scripts:
+
+- `scripts/generate-db-model.mjs` parses `supabase/schema.sql` → `src/data/generated/dbSchema.js`.
+  17 tables, 200 columns, 12 relationships, 40 policies, 2 triggers, 3 functions, 1 enum.
+  Cardinality is INFERRED, not declared: a foreign key that is also the child's own
+  primary key can only match one parent row, so it is one-to-one. Column counts were
+  validated against a hand count of all 17 tables — zero mismatches.
+- `scripts/generate-code-model.mjs` walks `src/` → `src/data/generated/codeMap.js`.
+  77 files, ~18,100 lines, the real import graph, the Supabase call sites, the routes
+  parsed out of `App.jsx`, and the dependency audit.
+
+Neither generated file contains a single row of warehouse data — verified by grepping for
+item-code patterns, project names and peso figures. They hold column names, file paths
+and policy expressions, all of which are already in the public repository.
+
+**Three parser bugs found and fixed while validating the output**, each of which had
+produced a confident falsehood:
+- Inline `-- comments` swallowed the column declared on the NEXT line, costing
+  `delivery_tracker.uom` and `safekeeping_requests.created_by` (and with it one
+  relationship). Comments are now stripped per line, quote-aware.
+- `commentAbove()` skipped blank lines while hunting for a comment, so `movements` was
+  documented as `"===== TRANSACTIONAL TABLES — created EMPTY…"` — a heading for eight
+  tables presented as the description of one. Adjacency is now required.
+- The dependency audit scanned only `src/`, so `vite` and `@vitejs/plugin-react` reported
+  as UNUSED. It now also reads `vite.config.js` and the scripts. Exactly the kind of
+  assertion this module must not print.
+
+**`src/data/processFlow.js`** is the authored half — the part needing judgement. The
+end-to-end journey (17 stages, 24 nodes), six process domains (57 steps), the
+architecture layers, six eight-step data-flow traces, the role matrix, the security
+sections, nine ranked vulnerabilities and the dependency commentary. `TABLE_NOTES` gives
+all 17 tables a plain-English description, because the schema's own comments cover only
+nine of them; the detail panel shows the schema comment underneath where the two differ,
+so the provenance of each sentence stays visible.
+
+**Counts on the page are counted, never asserted.** `SUMMARY.tally` walks every structure
+at import. An earlier draft of the journey's break-points card said "four points do not
+reach the database" and there were six — now derived.
+
+**Diagrams are drawn by hand; no diagram library was added.** React Flow or Mermaid would
+have roughly doubled the app's download for one documentation page, against five runtime
+packages today. `FlowDiagram.jsx` renders nodes as real `<button>` elements positioned
+absolutely with a single SVG edge layer behind them — SVG has no text wrapping, so every
+label would otherwise need a hand-rolled line breaker and still not ellipsise, focus or
+read to a screen reader. Panning is native scrolling on an `overflow:auto` viewport, with
+drag-to-pan added for the mouse. `ErdDiagram.jsx` lays tables out by dependency rather
+than by hand: no foreign keys either way, holds foreign keys, referenced by others. That
+grouping is what makes one absence visible — `audit_log` is transactional and still lands
+in the first column with nothing leaving it, because it records an email as text instead
+of referencing an account. The column heading names the RULE rather than describing the
+tables, because "Reference sheets" (the first draft) mislabelled the audit log as a sheet.
+
+**Layout decisions that were bugs first:**
+- The vertical layout rotated the node box to 78×208 — about four characters a line.
+  Rewritten around named `main`/`cross` axes so both orientations are one piece of
+  arithmetic; the box is always 208×78.
+- Reading ACROSS, the 17-stage journey is 4,900 px wide and fit-to-width lands at 40%,
+  which renders a 12 px label at five pixels. Down is now the default for every flow, and
+  `MIN_FIT` (0.85, shared with the ERD) stops fitting from ever shrinking below readable —
+  the viewport scrolls instead, the same trade the masterlist already makes on a phone.
+- Filtering by status DIMS rather than removes. Dropping boxes would leave arrows pointing
+  at nothing and imply the process is shorter than it is.
+- An edge into an unbuilt step is dashed. Solid would claim a working connection.
+- The orientation button is labelled with what pressing it gives you, not the state you
+  are already in.
+
+**Live database check** (`LiveProbe.jsx`) asks the running Supabase project for a row
+COUNT on each table — `head: true`, so no data crosses the network — on the signed-in
+user's own token. It therefore reports what *that account* may see, which is the honest
+demonstration of the coarse-RLS finding. Two things it now says that it did not at first:
+if EVERY reference table counts zero that is a permissions result and not an empty
+database (a session-less demo login produces exactly that, and reading seventeen zeroes as
+data loss would be a reasonable mistake), and the reassuring "an empty transactional table
+is expected" footnote is scoped to transactional tables only.
+
+**The Access view describes each role twice, side by side, because the interface and the
+database disagree** — and that gap is the most useful thing on the page. The database
+recognises exactly two kinds of user, administrator and everyone-else-signed-in, so all
+four operational roles hold identical rights: a project-site user shown "available stock"
+can read every unit price and the whole valuation, and `hydrate()` already downloads all
+of it into their browser. Also recorded there: `ROLES[*].menu` — a full per-role menu
+definition for each of the five roles — is read by nothing at all, because the sidebar was
+changed to one shared list with padlocks and the old menus were left behind.
+
+**Nine vulnerabilities, ranked, each with its location and its fix.** The one to act on
+first: `handle_new_user()` assigns a role from the text before the `@` and never looks at
+the domain, so if email signup is enabled on the Supabase project — the default for a new
+project — anyone registering as `admin@` any domain becomes an administrator of this
+application. That setting cannot be read from the code and must be checked in the
+dashboard. Also flagged: nothing writes to the audit log AND `audit_log.user_email` has no
+default from the token, unlike every other table, so an entry could be attributed to
+anyone; and the profiles `status` column plus the Users screen's Enable/Disable control
+have no effect on access at all, which is worse than having no control.
+
+**A notice on the page about the page.** The repository is public and this module ships in
+the published bundle, so the vulnerability section is world-readable. The underlying facts
+already were — `schema.sql` is committed — but this page collects them into one list, and
+it now says so where a reader will see it, with the one-line change that would restrict
+the view.
+
+**Module-scoped contrast fix.** This module prints a lot of 10–11 px type on the palette's
+matching weak tint, and in light mode four of the six pairs fall short of 4.5:1 — the
+warning yellow on its own tint is 3.4:1, brand red 3.5:1. Text now uses a darker `--ink-*`
+of the same hue while borders, dots and fills keep the palette colour; and `--text-faint`
+is darkened inside `.pf` only. The shared palette is untouched — the rest of the app uses
+these pairs at larger sizes, and re-toning it is not this module's job.
+
+**Also:** a purpose-drawn `flow` icon (two inputs joining one output — `layers` reads as
+stacked data and `reorganize` as moving stock); a Process Flow step added to the guided
+tour, anchored on the view tabs; `npm run model` added to package.json.
+
+**Verified** on a clean dev server at 1280×720, 1440×900 and 375×812, light and dark,
+across all eight views. Journey: 24 nodes, 26 edges (13 dashed), 17 stage labels, 100%
+zoom on desktop, zero clipped labels, zero overlaps, zero nodes outside the canvas. ERD:
+18 boxes including `auth.users`, 12 edges, 24 cardinality marks, zero overlaps, no clipped
+names. Status filter dims 9 of 24 and still renders all 24. Search returns 8 matches for
+"audit" across journey, processes, tables, proposed roles and findings, and highlights the
+matching nodes. Expand-all/collapse-all, node click → detail with evidence, ERD box click →
+column list with policies and triggers, and the live probe all exercised. Admin's card
+correctly shows no padlocked menu items where the other four do. No page-level horizontal
+scroll and nothing outside a scroll container on any view at any width; the diagrams
+scroll inside themselves on a phone at 85% (10.2 px effective labels). Contrast audited
+element-by-element in both themes: every text/background pair in this module's own CSS
+clears AA. Three failures remain and all three are shared app chrome that pre-dates this
+work and appears on every dashboard screen — `.sub-tab.active`, `.btn-primary` and
+`.badge-ok`, all white-or-tone on brand red at 4.12–4.38:1. No console errors on a fresh
+tab. `npm run build` passes; the whole model lands in the page's own lazy chunk (193 KB
+JS, 43 KB gzipped, plus 27 KB CSS) and the main bundle is unchanged.
+
+**Measurement notes for the next session.** Two traps, both self-inflicted and both
+already recorded in earlier entries — worth reading before trusting a reading here. React
+18 batches state updates, so a `.click()` and a DOM read in the SAME injected script
+always return the pre-click DOM; and because the node is a TOGGLE, clicking it in each of
+several verification calls silently alternated select and deselect, which looked exactly
+like a broken handler. One click, then read in a separate call, and count the parity.
+Setting a controlled input's `.value` directly does nothing either — React's value tracker
+sees no change, so the native `HTMLInputElement.prototype.value` setter has to be used
+before dispatching `input`. The console buffer also survives hard navigations, so the
+`height is not defined` errors from an intermediate edit kept reappearing; a fresh tab is
+what settles it. Screenshots remain unavailable while the browser pane is hidden, so every
+figure above is a DOM measurement.
+
+**Not done, deliberately:** the module documents the write-path gap rather than closing any
+of it, which is Phase 3 and a much larger change. The guided tour's Insights step still
+describes the ABC analysis chart that an earlier session deleted — spun off separately
+rather than fixed here.

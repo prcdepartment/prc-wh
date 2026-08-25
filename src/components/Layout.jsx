@@ -58,6 +58,7 @@ const ROUTE_TITLES = {
   '/purchase-requests': 'Purchase Requests',
   '/request-materials': 'Request Materials',
   '/delivery': 'Delivery Tracking',
+  '/process-flow': 'Process Flow',
 }
 
 function pageTitle(pathname) {

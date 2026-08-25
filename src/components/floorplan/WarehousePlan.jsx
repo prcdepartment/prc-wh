@@ -1,10 +1,10 @@
 import {
-  WH_VB, WH_BUILDING, WH_CANOPY, WH_AREAS, WH_ROOMS, WH_OPEN,
-  RACKS, CANTILEVER, FLOOR_AREA,
+  WH_VB, WH_BUILDING, WH_CANOPY, WH_AREAS, WH_ROOMS, WH_OPEN, AREA_BY_ID,
+  RACKS, CANTILEVER, FLOOR_AREA, areaCapacity, whAreaM2,
 } from '../../data/warehouseMap'
 import PlanDefs from './planDefs'
 import PlanText from './planText'
-import Icon from '../../lib/icons'
+import PlanIdCard, { Leader, CARD_W, CARD_H } from './planIdCard'
 
 // Level 2 — WAREHOUSE PLAN, TOP VIEW (reference slide 9).
 //
@@ -105,6 +105,25 @@ export default function WarehousePlan({
   const cantStep = (cantAlongY ? cant.h : cant.w) / CANTILEVER.bays
   const floor = mr(FLOOR_AREA.rect)
 
+  // The hovered section's identity plate. Floor area is computed from the drawing's own
+  // scale (~76 mm per raster pixel); occupancy is positions in use over positions the
+  // racking drawing provides. Both are real; only which line sits in which bay is not.
+  // Hover only, deliberately. The plate sits over the top-right of the drawing, so
+  // leaving it up for a SELECTED area parked it permanently on the heads of racks 10
+  // and 11 — and a selected area already has the full panel beside the map.
+  const plateBox = { x: vb.w - CARD_W - 14, y: 14 }
+  const hotArea = (hovered && AREA_BY_ID[hovered]) || null
+  const plate = hotArea && (() => {
+    const r = mr(hotArea.hull[0])
+    const c = areaCapacity(hotArea.id)
+    return {
+      area: hotArea,
+      from: [r.x + r.w / 2, r.y + r.h / 2],
+      m2: whAreaM2(hotArea),
+      pct: c.positions ? (c.used / c.positions) * 100 : null,
+    }
+  })()
+
   return (
     <svg className="fp-svg" viewBox={`0 0 ${vb.w} ${vb.h}`} role="img" aria-label="Central Warehouse Taytay warehouse plan, top view">
       <PlanDefs
@@ -186,31 +205,24 @@ export default function WarehousePlan({
         <title>{FLOOR_AREA.name} — block-stacked goods</title>
         <rect x={floor.x} y={floor.y} width={floor.w} height={floor.h} rx="3" />
         <rect x={floor.x} y={floor.y} width={floor.w} height={floor.h} rx="3" className="fp-tex" fill="url(#fpt-safekeeping)" />
-        <PlanText
-          x={floor.x + floor.w / 2} y={floor.y + floor.h / 2}
-          text={FLOOR_AREA.name.toUpperCase()} maxW={floor.w - 14} size={11} lh={13} cls="fp-floor-t"
-        />
       </g>
 
       {/* rack runs */}
       {RACKS.map((r) => <RackShape key={r.id} rack={r} />)}
 
-      {/* area icons last, so a rack never covers one. Wordmarks were removed — the
-          legend beneath the plan carries the names now. A run only one rack deep is too
-          shallow for an icon, so it gets none (identified by hover and the legend). */}
-      {showSections && WH_AREAS.map((a) => {
-        const r = mr(a.hull[0])
-        const across = Math.min(r.w, r.h)
-        const ic = iconFor(across)
-        if (ic <= 0) return null
-        const cx = r.x + r.w / 2
-        const cy = r.y + r.h / 2
-        return (
-          <g key={a.id} className={`fp-t-${a.role}`} transform={`translate(${cx - ic / 2} ${cy - ic / 2})`} pointerEvents="none">
-            <Icon name={a.icon} size={ic} />
-          </g>
-        )
-      })}
+      {/* Nothing is labelled on the drawing itself any more. Hovering a coloured
+          section draws a leader line from it to an identity plate in the top-right
+          corner, which is where the names, floor areas and occupancy now live. */}
+      {plate && (
+        <>
+          <Leader from={plate.from} to={[plateBox.x, plateBox.y + CARD_H / 2]} />
+          <PlanIdCard
+            x={plateBox.x} y={plateBox.y}
+            area={plate.area} m2={plate.m2} pct={plate.pct}
+            u={1.25} active
+          />
+        </>
+      )}
     </svg>
   )
 }

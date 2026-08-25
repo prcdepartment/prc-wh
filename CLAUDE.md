@@ -1846,3 +1846,65 @@ per-document reconciliation possible.
 
 Audience corrected too — the meeting is with Megawide IT’s in-house SAP team, not
 an external reseller, so the partner-billing framing was dropped.
+
+### 2026-08-17 — Session: cylinder capacity chart, identity plates, plan declutter
+
+**Warehouse Capacity is a cylinder now** (`FacilityCapacityGauge.jsx`, rewritten). Drawn
+as a vessel seen slightly from above and filled from the base up, after the HyperOS
+storage meter: red for warehouse-owned racking, yellow above it for Safekeeping, clear
+glass for what neither has filled. Every band's height is exactly its share of the total
+positions, so it is a stacked bar that happens to be round — the 3D is decoration, not
+data. Hovering a band (or its legend row) draws a leader line out to the name, the
+percentage and the position count; the other bands drop back.
+
+Each slab is a straight wall closed by the FRONT half of the ellipse at both ends, with
+its own full ellipse capping the top, drawn base-upward so each cap covers the wall
+below it. Curvature is one shared black-to-clear-to-black gradient over the flat fill,
+so it works for any band colour without a second palette.
+
+**A layout trap worth recording.** With the svg in flow at `width: 100%`, its viewBox
+aspect ratio (470/320) demanded 733 px of height from a 499 px column and dragged the
+whole grid row to 1,026 px — well past the fold. The svg is now `position: absolute;
+inset: 0` inside a `flex: 1` stage, so it contributes no intrinsic height and
+`preserveAspectRatio` centres the cylinder in whatever box the stage gets. Both cards
+measured 655 px and the page stopped scrolling.
+
+**Identity plates replace both legends.** New `planIdCard.jsx` draws an area's plate
+INSIDE the plan svg — colour bar, icon, name, floor area, occupancy — which is what makes
+the leader line free: both ends are already in the same coordinate space, so joining a
+block to its plate is one polyline. Level 1 stacks all four in the drawing's top-right
+corner like a title block; level 2 shows one on hover with a leader line back to the
+section, and nothing at all otherwise.
+
+Floor areas are derived, not invented: the site drawing states the shed at 2,520 m², and
+that single figure fixes m² per viewBox unit for every other site area (`siteAreaM2`).
+Inside the shed the scale is the raster's own ~76 mm per pixel (`whAreaM2`). Occupancy is
+positions in use over positions the racking drawing provides — so the outdoor yards,
+which have no recorded capacity, print "no capacity data" rather than a made-up number.
+
+**Also on the plans:** level 1 lost the Site Areas tile list (the right column is the
+cylinder alone) and level 2 lost its area icons and the Open Flat Area wordmark. Both
+bottom legends are gone.
+
+**Two fixes found while verifying.**
+- `wrapLabel`, not `fitSize`, is what a plate name needs. `fitSize` only shrinks until
+  the longest WORD fits, so MATERIAL RECOVERY FACILITY still overran the plate by 29
+  units; shrinking it far enough to fit one line would have put it at ~6 px on screen.
+  It wraps to two lines instead and the plate is 50 units tall to suit.
+- The level-2 plate was showing for a SELECTED area as well as a hovered one, which
+  parked it permanently on the heads of racks 10 and 11. Hover only now — a selected
+  area already has the full panel beside the map.
+
+**Verified** against a temporary anonymised fixture (deleted afterwards; `main.jsx`
+restored and `dist/` confirmed clean) at 1440×900 and 375×812, light and dark, across
+sixteen view/theme combinations: zero labels clipped, zero overlaps, nothing outside a
+scroll container, no vertical page scroll on the site level. With data the cylinder read
+32% / 16% / 52% summing to 100, and the Central Warehouse plate's 48% matched the two
+filled bands. Hover exercised on both the cylinder bands and the level-2 hulls — note
+React derives `onMouseEnter` from delegated `mouseover`, so a dispatched `mouseenter`
+does nothing; the checks use `mouseover`/`mouseout`.
+
+**Console caveat, again.** The browser pane keeps its console buffer across dev-server
+restarts and hard navigations, so `fitSize is not defined` kept reappearing after the
+import had been changed. `curl`-ing the served module and grepping it (0 hits) is what
+settled it. Judge a stale-looking error by the module the server is actually serving.

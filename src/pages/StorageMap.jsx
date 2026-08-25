@@ -35,21 +35,6 @@ const LEVELS = [
   { id: 'rack', label: 'Racking', icon: 'layers' },
 ]
 
-// The plan blocks show only an icon now; this legend decodes the icon + colour for
-// each area. Used on the site and warehouse levels.
-function FpLegend({ areas }) {
-  return (
-    <div className="fp-legend fp-legend-areas">
-      {areas.map((a) => (
-        <span key={a.id} className="fp-legend-i">
-          <i className={`fp-swatch fp-sw-${a.role}`} />
-          <Icon name={a.icon} size={13} /> {a.name}
-        </span>
-      ))}
-    </div>
-  )
-}
-
 const rackLabel = (id) =>
   id === 'CANT' ? CANTILEVER.name
     : id === 'FLOOR' ? FLOOR_AREA.name
@@ -126,7 +111,6 @@ export default function StorageMap() {
               onDrill={() => go({ level: 'warehouse', area: null })}
             />
           </div>
-          <FpLegend areas={SITE_AREAS} />
         </Card>
 
         {sel ? (
@@ -144,35 +128,8 @@ export default function StorageMap() {
             )}
           />
         ) : (
-          /* One card on the right: the capacity read-out and its chart, then the site
-             areas. They were three separate blocks — the gauge above the map, the map,
-             and the overview beside it — which left the map boxed into a short cell. */
-          <Card title="Warehouse Capacity" icon="warehouse" className="fp-side-card">
+          <Card title="Warehouse Capacity" icon="warehouse" className="fp-side-card fp-cap-card">
             <FacilityCapacityGauge bare />
-            <div className="fp-side-split">
-              <span>Site Areas</span>
-              <p>Pick an area, here or on the plan, to see what is stored there.</p>
-            </div>
-            <div className="fp-tiles">
-              {SITE_AREAS.map((a) => {
-                const p = a.id === 'warehouse'
-                  ? items.filter((i) => plan.byLine.get(i.id)?.level !== 'site')
-                  : siteItems(a.id)
-                return (
-                  <button key={a.id} className={`fp-tile fp-t-${a.role}`} onClick={() => (a.drill ? go({ level: 'warehouse' }) : go({ area: a.id }))}>
-                    <span className="fp-tile-ico"><Icon name={a.icon} size={16} /></span>
-                    <span className="n">{a.name}</span>
-                    <span className="v tabular">{num(p.length)}</span>
-                    <span className="u">lines</span>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="fp-mrf-note">
-              The Material Recovery Facility count is a view, not a fourth bucket: damaged stock is flagged where it
-              lies rather than moved, so it lists the {num(mrf.length)} lines carrying a damaged quantity —{' '}
-              {num(mrf.reduce((a, b) => a + (b.damagedQty || 0), 0))} units awaiting disposition.
-            </div>
           </Card>
         )}
       </Shell>
@@ -223,7 +180,6 @@ export default function StorageMap() {
               onOpenRack={(id) => go({ level: 'rack', rack: id, area: id === 'CANT' || id === 'FLOOR' ? 'safekeeping' : RACKS.find((r) => r.id === id)?.area || area })}
             />
           </div>
-          <FpLegend areas={WH_AREAS} />
         </Card>
 
         {sel ? (

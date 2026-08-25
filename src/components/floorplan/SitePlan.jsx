@@ -1,6 +1,7 @@
-import { SITE_VB, SITE_BOUNDARY, SITE_AREAS, SITE_YARD } from '../../data/warehouseMap'
+import { SITE_VB, SITE_BOUNDARY, SITE_AREAS, SITE_YARD, siteAreaM2, facilityCapacity } from '../../data/warehouseMap'
 import PlanDefs from './planDefs'
 import PlanText from './planText'
+import PlanIdCard, { CARD_W, CARD_H, stackAt } from './planIdCard'
 
 // Level 1 — the stockyard: the property, the shed, and the outdoor material areas
 // around it (reference slide 4, site development plan).
@@ -20,6 +21,23 @@ const toVB = (x, y) => ({ x: (x - 3.535) * K, y: (y - 1.292) * K })
 // viewport at the group's origin, so the translate carries the placement.
 export default function SitePlan({ selected, onSelect, onDrill, hovered, onHover }) {
   const { w, h } = SITE_VB
+
+  // Identity plates, stacked in the drawing's top-right corner like a title block.
+  // They replace the legend that used to sit under the plan: same job, but each plate
+  // also carries the area's floor area and how much of it is in use.
+  //
+  // Floor area is derived from the drawing (the shed's stated 2,520 m² fixes the
+  // scale). Occupancy exists only where something records capacity — the shed has
+  // pallet and shelf positions, the outdoor yards have none, so those plates say so
+  // rather than inventing a number.
+  const cap = facilityCapacity()
+  const stack = stackAt(w, SITE_AREAS.length)
+  const plates = SITE_AREAS.map((a, i) => ({
+    area: a,
+    y: stack.y + i * (CARD_H + 7),
+    m2: siteAreaM2(a),
+    pct: a.id === 'warehouse' ? cap.warehousePct + cap.safekeepingPct : null,
+  }))
 
   const interact = (a) => ({
     role: 'button',
@@ -80,6 +98,23 @@ export default function SitePlan({ selected, onSelect, onDrill, hovered, onHover
           </g>
         )
       })}
+
+      {/* identity plates, last so nothing draws over them */}
+      <g className="fp-id-stack">
+        <rect
+          className="fp-id-stack-bg"
+          x={stack.x - 8} y={stack.y - 8}
+          width={CARD_W + 16} height={stack.h + 16} rx="10"
+        />
+        {plates.map((p) => (
+          <PlanIdCard
+            key={p.area.id}
+            x={stack.x} y={p.y}
+            area={p.area} m2={p.m2} pct={p.pct}
+            active={selected === p.area.id || hovered === p.area.id}
+          />
+        ))}
+      </g>
     </svg>
   )
 }

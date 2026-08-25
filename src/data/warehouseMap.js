@@ -306,6 +306,36 @@ export const WH_OPEN = {
 
 export const AREA_BY_ID = Object.fromEntries(WH_AREAS.map((a) => [a.id, a]))
 
+/* ------------------------------------------------------------- floor areas */
+
+// Shoelace, in whatever units the points are given in.
+const polyArea = (ring) => Math.abs(ring.reduce((s, [x, y], i) => {
+  const [x2, y2] = ring[(i + 1) % ring.length]
+  return s + (x * y2 - x2 * y)
+}, 0)) / 2
+
+// The site drawing states the shed at 2,520 m², so that one figure fixes the scale for
+// every other area on the site plan — no second measurement, no assumed dpi.
+const SITE_M2_PER_UNIT = 2520 / polyArea(SITE_BUILDING)
+
+export function siteAreaM2(a) {
+  const units = a.poly
+    ? polyArea(a.poly)
+    : a.rotRect
+      ? (a.rotRect.w * k) * (a.rotRect.h * k)
+      : a.rects.reduce((s, r) => s + r.w * r.h, 0)
+  return units * SITE_M2_PER_UNIT
+}
+
+// Inside the shed the scale comes from the raster: 1 px is ~76 mm, derived from the
+// drawing's own 3950 mm clear aisle measuring 52 px between rack runs.
+const WH_M2_PER_PX = (WH_MM_PER_PX / 1000) ** 2
+
+export function whAreaM2(a) {
+  const px = a.poly ? polyArea(a.poly) : a.hull.reduce((s, r) => s + r.w * r.h, 0)
+  return px * WH_M2_PER_PX
+}
+
 /* ------------------------------------------------------------- racking level */
 
 // Slide 15, INTERLOCK 600 selective pallet racking. Level 1 is a floor position; the

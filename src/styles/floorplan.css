@@ -24,6 +24,76 @@
 .fp-floorarea:hover > rect { fill-opacity: 0.6; }
 .fp-floorarea.is-active > rect { fill-opacity: 0.66; }
 
+/* --- identity plates on the drawing -------------------------------------
+   These replaced the legend under the plan. They are drawn inside the plan SVG so a
+   leader line to one is just a polyline in the same coordinate space; the trade-off is
+   that their type scales with the drawing, which is what the `u` prop compensates for. */
+.fp-id-stack-bg { fill: var(--surface); fill-opacity: 0.9; stroke: var(--border); stroke-width: 1; }
+.fp-id-bg {
+  fill: var(--surface); stroke: var(--border-strong); stroke-width: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.16));
+}
+.fp-id-bar { fill: var(--c, var(--border-strong)); }
+.fp-id.is-active .fp-id-bg { stroke: var(--c); stroke-width: 1.8; }
+.fp-id svg { color: var(--c); }
+.fp-id-name { fill: var(--text); font-weight: 800; letter-spacing: 0.5px; }
+.fp-id-meta { fill: var(--text-muted); font-weight: 600; }
+.fp-id-sep { fill: var(--text-faint); }
+.fp-id-pct { fill: var(--c); font-weight: 800; }
+.fp-id-lines { fill: var(--text-muted); }
+.fp-id-none { fill: var(--text-faint); font-style: italic; font-weight: 500; }
+
+.fp-leader circle { fill: var(--brand-red); }
+.fp-leader polyline { fill: none; stroke: var(--brand-red); stroke-width: 1.6; stroke-dasharray: 4 3; }
+
+/* --- warehouse capacity: a cylinder, filled from the base up -------------- */
+:root { --cap-wh: #ee3124; --cap-sk: #c9962a; --cap-av: #8d8b8b; }
+:root[data-theme='dark'] { --cap-wh: #f4695d; --cap-sk: #d9a63a; --cap-av: #7b7979; }
+
+.cap-3d { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+/* The svg is absolutely positioned so its viewBox aspect ratio contributes NO intrinsic
+   height. Left in flow at width:100% it demanded 470/320 of its own width — 733px — and
+   dragged the whole grid row past the fold. preserveAspectRatio centres the cylinder in
+   whatever box the stage ends up with. */
+.cap-3d-stage { flex: 1 1 0; min-height: 240px; position: relative; }
+.cap-3d-stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.cap-band { cursor: default; transition: opacity 0.16s; }
+.cap-band .cap-wall { fill: var(--band); }
+.cap-band .cap-wall-shade { stroke: none; }
+.cap-band .cap-cap { fill: var(--band); }
+/* the top face reads as lit — a flat wash of the same colour looks like a hole */
+.cap-band .cap-cap-shade { fill: #fff; fill-opacity: 0.22; stroke: color-mix(in srgb, var(--band) 60%, #000); stroke-width: 1; }
+.cap-band.is-cool { opacity: 0.5; }
+.cap-band.is-hot .cap-cap-shade { fill-opacity: 0.34; }
+.cap-glass-wall { stroke: none; }
+.cap-glass-edge { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 5 4; }
+.cap-band.is-empty.is-hot .cap-glass-edge { stroke: var(--cap-av); stroke-dasharray: none; }
+.cap-rim { fill: none; stroke: var(--text); stroke-width: 1.8; opacity: 0.55; }
+.cap-waterline { fill: none; stroke: rgba(255, 255, 255, 0.5); stroke-width: 1.2; }
+
+.cap-leader circle { fill: var(--band); }
+.cap-leader polyline { fill: none; stroke: var(--band); stroke-width: 1.6; }
+.cap-leader-l { fill: var(--text-muted); font-size: 10px; font-weight: 800; letter-spacing: 0.8px; }
+.cap-leader-v { fill: var(--band); font-size: 15px; font-weight: 800; }
+.cap-leader-s { fill: var(--text-faint); font-size: 10px; font-weight: 600; }
+
+.cap-3d-legend { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; flex: none; }
+.cap-3d-item {
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 10px;
+  padding: 9px 11px; border: 1px solid var(--border); border-left: 3px solid var(--band);
+  border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text);
+  font: inherit; text-align: left; cursor: default; transition: background 0.14s, border-color 0.14s;
+}
+.cap-3d-item.is-hot { background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.cap-3d-chip {
+  width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none;
+  background: color-mix(in srgb, var(--band) 16%, transparent); color: var(--band);
+}
+.cap-3d-l { font-size: 12.5px; font-weight: 700; }
+.cap-3d-p { font-size: 15px; font-weight: 800; color: var(--band); }
+.cap-3d-n { font-size: 10.5px; color: var(--text-muted); min-width: 62px; text-align: right; }
+
 /* --- level switcher: a stepper, not a tab strip --------------------------- */
 
 .fp-steps { display: flex; align-items: stretch; gap: 0; }
@@ -93,6 +163,9 @@
 .fp-map-card .fp-stage { flex: 1; display: flex; align-items: center; justify-content: center; }
 .fp-map-card .fp-svg { max-height: 100%; }
 .fp-side-card { display: flex; flex-direction: column; }
+/* the capacity card is now the whole right column, so its body has to fill it */
+.fp-cap-card > .card-pad { flex: 1; display: flex; min-height: 0; }
+.fp-cap-card > .card-pad > * { flex: 1; min-height: 0; }
 
 /* the capacity widget, stripped of its own frame for the card it now lives in */
 .cap-widget.is-bare { background: none; border: 0; box-shadow: none; padding: 0; margin: 0; }

@@ -1791,3 +1791,23 @@ The Open Stock Yard's own text label is untouched.
 
 Verified: 0 icons drawn inside `.fp-svg` at level 1, the four-item legend still lists
 every area by name, zero label overlaps, zero page scroll. `npm run build` passes.
+
+### 2026-08-25 — Session: SAP integration briefing document
+
+No app code changed. Added `docs/sap-integration-brief.md` — the preparation
+material for the working session with the SAP specialists: the system-of-record vs
+system-of-engagement framing, the responsibility split to propose, the ten
+discovery questions their landscape hangs on (ECC vs S/4, on-prem vs RISE, which
+modules, whether BTP/CPI exists), a table mapping every one of our Postgres tables
+to its SAP object (`inventory`→`MARD`/`MB52`, `ledger`→`MKPF`/`MSEG`,
+`movements`→`BAPI_GOODSMVT_CREATE`, `purchase_requests`→`EBAN`, and so on), the
+five integration mechanisms ranked (OData/Gateway, BAPI/RFC, IDoc, BTP Integration
+Suite as middleware, file exchange as the stopgap) plus the three to refuse, the
+outbox/idempotency/reconciliation architecture, the movement-type cheat sheet, the
+Digital Access licensing exposure, a four-phase rollout with gates, and the
+shopping list to hand over at the end of the meeting.
+
+Two app-side facts recorded there because they will surface in that meeting: a
+public GitHub Pages site will not survive an SAP security review once it touches
+production data, and RFC/most SAP auth flows need a server-side component the app
+does not currently have.

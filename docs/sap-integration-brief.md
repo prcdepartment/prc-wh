@@ -1,508 +1,558 @@
-# SAP Integration Brief — PRC-WH App (Megawide Central Warehouse)
+# SAP Business One Integration Brief — PRC-WH App (Megawide Central Warehouse)
 
-Prepared for the working session with the SAP specialists. Written so you can run
-the meeting without an SAP background, and so the specialists can answer in their
-own vocabulary without having to guess what this app is.
+Prepared for the working session with the SAP specialists in Megawide IT.
+
+**Target: a read-write connection.** The app must be able to read live stock and
+post real inventory documents into Business One.
+
+> **Supersedes the earlier ECC/S4HANA version of this document.** That draft was
+> written before we established that Megawide runs **SAP Business One**, and it
+> aimed at the wrong product. Anything you remember about BAPIs, RFC, IDocs, SAP
+> Gateway, ABAP transports, movement types (`101`, `221`, `311`), or the `MARA` /
+> `MARD` / `MSEG` tables does not apply here. Business One is a different product
+> with a different database, a different vocabulary, and — helpfully — a much
+> simpler integration story.
 
 ---
 
-## 1. The one-sentence framing (say this first)
+## 1. What we know about the landscape, and what to confirm
 
-> **SAP stays the system of record. This app is the system of engagement.**
-> Every stock quantity, valuation and financial posting continues to live in SAP.
-> The app is the front end the warehouse team actually touches, and every action a
-> user takes here must end up as a real SAP document — not as a number that only
-> exists in our database.
+The starting evidence is the URL the team uses day to day:
 
-Why that sentence matters: the first thing an SAP team fears is a shadow inventory
-system. Saying this up front changes the conversation from "should we allow this?"
-to "which interface do we use?". It also commits you to something real — the app
-must never be the place where a stock figure is *invented*.
+```
+https://sapcloudv10-02.megawide.com.ph:8200/dispatcher/
+```
+
+What that tells us, and what still needs confirming in the room:
+
+| Signal | Reading | Confirm |
+|---|---|---|
+| `/dispatcher/` on a high port | **Browser Access** — the service that streams the Windows B1 client into a browser. Documented default is port 8100; ours is on 8200. | — |
+| `sapcloudv10` | **SAP Business One version 10** (the current major release, and the one with the modern API). | Exact version and feature pack |
+| `megawide.com.ph` | Self-hosted or partner-hosted on a Megawide domain — **not** inside an unreachable private network. | Who administers the server |
+| Reachable from the public internet | A network path to the server likely already exists. | Whether other ports can be opened the same way |
+
+Still unknown and material: whether the underlying database is **SAP HANA or
+Microsoft SQL Server**, how many **company databases** exist on that server,
+whether a **test company** exists, and — most importantly — whether the
+**Service Layer** is switched on.
+
+---
+
+## 2. The framing (say this first)
+
+> **Business One stays the system of record. This app is the system of
+> engagement.** Every stock quantity, value and posting that matters to Finance
+> continues to live in B1. Our app is the front end the warehouse team actually
+> touches, and every action taken here ends its life as a real Business One
+> document.
+
+The instinctive fear of any SAP team meeting a new system is that it is a shadow
+inventory database being smuggled in. This sentence turns their question from
+"should we permit this" into "which interface should you use", which is a
+question they enjoy answering. It also binds us to something real, and we should
+be willing to be bound: **the app must never be the place where a stock figure is
+invented.**
 
 ### The division of responsibility to propose
 
 | Concern | Owner |
 |---|---|
-| Material master, UoM, valuation class, prices | **SAP** (app reads only) |
-| Plant / storage location / batch definitions | **SAP** |
-| Stock quantities, goods movements, financial postings | **SAP** (app *requests*, SAP *posts*) |
-| Purchase requisitions / orders | **SAP** (app may originate, SAP approves and numbers) |
-| WBS / project structures | **SAP** (PS module) |
-| Physical bin/rack/bay placement, floor plan | **App** (SAP likely has no WM/EWM detail for CW Taytay) |
-| Photos, condition grading, safekeeping custody log | **App** |
-| Delivery scheduling tracker, site coordination | **App** |
+| Item master, units of measure, item groups, prices | **B1** (app reads only) |
+| Warehouse definitions, bin locations (if enabled) | **B1** |
+| Stock quantities, inventory documents, journal postings | **B1** (app *requests*, B1 *posts*) |
+| Purchase requests / purchase orders | **B1** (app may originate, B1 numbers and approves) |
+| Business partners (suppliers) | **B1** |
+| Projects / cost centres | **B1** |
+| Floor plan, rack and bay placement, physical layout | **App** (unless bin locations are enabled — see §6) |
+| Photographs, condition grading, safekeeping custody log | **App** |
+| Delivery scheduling and site coordination | **App** |
 | Dashboards, analytics, ranked lists, guided workflows | **App** |
-| Users, roles, approval *routing* | **App** (final posting authority still SAP) |
+| App users, roles, approval *routing* | **App** (final posting authority still B1) |
 
-The middle rows are the negotiation. The bottom rows are your value proposition —
-the things SAP genuinely does not do well, and that nobody will fight you on.
-
----
-
-## 2. What you must find out about *their* SAP
-
-Nothing downstream can be finalised until these are answered. Ask in this order:
-
-1. **Which product and release?** `SAP ECC 6.0` (which EhP?) or `S/4HANA` (which
-   release — 1809 / 1909 / 2020 / 2021 / 2022 / 2023)?
-   *Why:* S/4HANA ships hundreds of ready-made OData APIs. ECC does not — there
-   you are mostly in BAPI/RFC/IDoc territory and someone has to build the service
-   layer.
-2. **On-premise, RISE with SAP (private cloud), or Public Cloud?**
-   *Why:* On-prem needs an **SAP Cloud Connector** or VPN before anything on the
-   internet can reach it. Public Cloud forbids custom ABAP entirely — only
-   released APIs and extensions on BTP.
-3. **Which modules are live?** Specifically `MM-IM` (Inventory Management),
-   `MM-PUR` (Purchasing), `WM` (legacy Warehouse Management) or `EWM` (Extended
-   WM), `PS` (Project System), `FI/CO`, `PM`.
-   *Why:* If EWM/WM is live, bins already exist in SAP and our floor plan should
-   eventually *mirror* SAP bins rather than invent them. If it is not live, the
-   floor plan is genuinely new information and SAP has nothing to conflict with —
-   a much easier story.
-4. **Do you own SAP BTP / Integration Suite (formerly CPI)?** Or other middleware
-   — SAP PI/PO, MuleSoft, Boomi, Azure Logic Apps?
-   *Why:* If middleware exists, use it. Building a second integration path around
-   an existing ESB is the fastest way to get vetoed.
-5. **Is SAP Gateway activated?** (`/IWFND/MAINT_SERVICE`, `/IWFND/GW_CLIENT`.)
-   Is `SICF` open for OData?
-6. **What is the plant / storage location structure for CW Taytay?** Plant code,
-   storage location code(s), and whether safekeeping is a separate storage
-   location, a special stock type, or not represented at all.
-7. **Are our item codes the SAP material numbers?** Our `item_master` has 7,378
-   rows — someone must confirm whether that *is* `MARA`, or whether a mapping
-   table is required permanently.
-8. **Digital Access / indirect access licensing** — see §8. Ask directly.
-9. **Who owns the SAP change window and transport path**, and what is the lead
-   time for a transport to production?
-10. **Is there a non-production system** (DEV/QAS/sandbox) we can be given a
-    technical user on this quarter?
-
-Questions 1, 2 and 4 alone determine which of the five options in §4 is even
-possible.
+The middle rows are the negotiation. The bottom rows are our value proposition —
+things B1 does not do well and nobody will fight us on.
 
 ---
 
-## 3. What the app holds today (bring this table — they will ask)
+## 3. The answer: the Service Layer
 
-Our Postgres (Supabase) schema, and the SAP object each maps to:
+Business One ships with a modern REST/OData web API called the **Service Layer**.
+It is not something anyone has to build for us. It is either already running or
+it is a configuration change.
 
-| App table | Rows today | SAP counterpart | SAP object / table |
+- **Address:** same server, port **50000** by default, so most likely
+  `https://sapcloudv10-02.megawide.com.ph:50000/b1s/v2/`. **Confirm — do not
+  assume.**
+- **Protocol paths:** `/b1s/v2/` is OData v4 and is the current standard;
+  `/b1s/v1/` is the older OData v3 and has been deprecated by SAP. Build against
+  **v2** unless their installation cannot serve it.
+- **Capability:** full read *and* write on essentially every business object we
+  care about — items, stock, goods receipts, goods issues, transfers, purchase
+  requests, purchase orders, inventory counts.
+- **Format:** ordinary HTTPS with JSON. Nothing proprietary, no special SDK, no
+  Windows-only components.
+
+### How authentication works
+
+Worth knowing precisely, because it shapes what I build:
+
+1. `POST /b1s/v2/Login` with a JSON body naming the **company database**, a
+   **username** and a **password**.
+2. B1 returns a **session ID** and sets a session cookie.
+3. Every subsequent request carries that session.
+4. The session **expires after roughly 30 minutes of inactivity** (configurable),
+   so our worker must handle re-login transparently rather than failing.
+5. `POST /Logout` releases it — and releasing sessions matters, because
+   concurrent sessions may be limited by licence.
+
+### Useful properties we will lean on
+
+- **OData query options** (`$filter`, `$select`, `$orderby`, `$top`, `$skip`,
+  `$expand`, `$count`) mean we can ask for exactly the rows and columns we need
+  rather than pulling everything and filtering locally.
+- **Paging** is on by default at a small page size and controlled by a request
+  header — our loader must follow the next-page links or it will silently read
+  only the first page. This is a classic first-week bug and I will guard for it.
+- **Batch requests** (`POST /$batch`) group several operations, and a *changeset*
+  inside a batch is atomic — all succeed or all roll back. This is how we post a
+  multi-document operation safely.
+- **Every document carries two numbers**: `DocEntry`, the internal key we store
+  as our proof, and `DocNum`, the human-visible number the warehouse team will
+  recognise. We store both.
+
+---
+
+## 4. The alternatives, and what to decline
+
+| Route | What it is | Verdict |
+|---|---|---|
+| **Service Layer** | REST/OData, read-write, built in | ★ **This is what we want** |
+| **DI API** | Older Windows-only programming interface | Works, but cannot be called from a web application. Push back toward the Service Layer if suggested. |
+| **DI Server** | A SOAP web-service wrapper around the DI API | Acceptable fallback if the Service Layer genuinely cannot be enabled. Clunkier. |
+| **B1if (Integration Framework)** | B1's bundled middleware, included at no extra cost | Reasonable if IT already uses it and wants the connection to run through their own layer. Optional for us. |
+| **Direct SQL against the company database** | Reading the HANA/SQL tables directly | **Read-only, and only if IT insists.** Never write this way — it bypasses all of B1's business logic and will corrupt data. Even for reads, it breaks on upgrade. |
+| **Screen automation of the B1 client** | Driving the Windows UI programmatically | **No.** Not for a live interface, ever. |
+
+**The one line to hold:** we never write to Business One except through the
+Service Layer (or DI Server). No direct table writes, under any circumstances,
+for any reason, however urgent.
+
+---
+
+## 5. Mapping our data to Business One
+
+Our Postgres schema and the B1 object each corresponds to:
+
+| App table | Rows today | B1 Service Layer object | B1 table |
 |---|---|---|---|
-| `item_master` | 7,378 | Material master | `MARA` / `MAKT` / `MARC` |
-| `inventory` | 779 | Stock on hand per material/plant/sloc | `MARD`, `MCHB` (batch), report `MB52` |
-| `ledger` | 184 | Material documents (goods movements) | `MKPF` / `MSEG` |
-| `movements` | empty | Goods movement to be posted | `BAPI_GOODSMVT_CREATE` → `MKPF`/`MSEG` |
-| `reservations` | empty | Reservation | `RESB` / `RKPF` |
-| `material_requests` | empty | Reservation **or** PR — business decision | `RESB` or `EBAN` |
-| `purchase_requests` | empty | Purchase requisition | `EBAN` |
-| `delivery_tracker` | 27 | Inbound delivery / PO schedule line | `LIKP` / `LIPS`, `EKET` |
-| `safekeeping_*` | 563 | Special stock or separate sloc — **to decide** | `MSKA`/`MSLB`, or own sloc |
-| `projects` | — | WBS element / project | `PRPS` / `PROJ` |
-| `trades` | 7 | Material group | `MARA-MATKL` / `T023` |
-| `approvals` | empty | App-side routing only | — (SAP release strategy is separate) |
+| `item_master` | 7,378 | `Items` | `OITM` |
+| `inventory` | 779 | `Items(...)/ItemWarehouseInfoCollection` — `InStock`, `Committed`, `Ordered` per warehouse | `OITW` |
+| `ledger` | 184 | inventory document history | `OINM` (inventory transactions) |
+| `movements` (Incoming) | empty | `InventoryGenEntries` (goods receipt) or `PurchaseDeliveryNotes` (receipt against a PO) | `OIGN` / `OPDN` |
+| `movements` (Outgoing) | empty | `InventoryGenExits` (goods issue) | `OIGE` |
+| `movements` (Transfer) | empty | `StockTransfers` | `OWTR` |
+| `reservations` | empty | **No direct equivalent** — see §7 | — |
+| `material_requests` | empty | `InventoryTransferRequests` or `PurchaseRequests` — decision needed | `OWTQ` / `OPRQ` |
+| `purchase_requests` | empty | `PurchaseRequests` | `OPRQ` |
+| `delivery_tracker` | 27 | `PurchaseOrders` open lines / expected deliveries | `OPOR` / `POR1` |
+| `safekeeping_*` | 563 | Separate warehouse, or a customer-owned-stock arrangement — decision needed | `OWHS` |
+| `projects` | — | `Projects` or `ProfitCenters` / `Dimensions` — confirm which they use | `OPRJ` / `OPRC` |
+| `trades` | 7 | `ItemGroups` or a user-defined field | `OITB` |
+| `approvals` | empty | App-side routing (B1 has its own approval procedures — keep separate) | — |
 | `audit_log` | empty | App-side | — |
 
-Two gaps to flag yourself, before they find them:
+Two gaps to raise ourselves before they are found:
 
-- **No batch or serial number handling.** If SAP manages this material in batches,
-  every goods movement we post must carry a batch, and we currently cannot supply
-  one.
-- **Floor-plan bin placement is modelled, not recorded.** Real bin data has to
-  come from somewhere — either EWM/WM, or we start capturing it and it becomes the
-  app's own authoritative dataset.
-
----
-
-## 4. The integration options, ranked
-
-Present these as a menu and let the specialists pick.
-
-### Option A — OData / SAP Gateway ★ preferred on S/4HANA
-
-SAP exposes REST-style JSON services. On S/4HANA many already exist as standard
-(published on `api.sap.com`):
-
-- `API_MATERIAL_STOCK_SRV` — read stock on hand
-- `API_MATERIAL_DOCUMENT_SRV` — read **and post** goods movements
-- `API_PRODUCT_SRV` — material master
-- `API_PURCHASEREQ_PROCESS_SRV` — purchase requisitions
-- `API_INBOUND_DELIVERY_SRV` — inbound deliveries
-- `API_RESERVATION_DOCUMENT_SRV` — reservations
-- `API_PHYSICAL_INVENTORY_DOC_SRV` — cycle counts
-
-**Ask for:** service activation, a technical/communication user, the endpoint URL,
-and whether `$batch` and delta tokens are enabled.
-**Best for:** everything, if available. This is the modern answer.
-
-### Option B — BAPI / RFC
-
-Function modules called over SAP's RFC protocol. Works on ECC *and* S/4.
-
-| BAPI | Use |
-|---|---|
-| `BAPI_GOODSMVT_CREATE` | post goods receipt / issue / transfer |
-| `BAPI_MATERIAL_GETLIST` / `..._GET_DETAIL` | material master read |
-| `BAPI_MATERIAL_AVAILABILITY` | ATP / available stock |
-| `BAPI_RESERVATION_CREATE1` | create reservation |
-| `BAPI_REQUISITION_CREATE` | create purchase requisition |
-| `BAPI_PO_GETDETAIL` | purchase order read |
-| `BAPI_TRANSACTION_COMMIT` | **mandatory** after any create BAPI |
-
-**Ask for:** an RFC-enabled technical user, and whether they would rather wrap
-these in a custom OData service themselves (usually they would — it keeps the RFC
-layer inside their perimeter).
-**Watch out:** `node-rfc` needs the SAP NetWeaver RFC SDK binaries on a server.
-This cannot run from a browser or from GitHub Pages.
-
-### Option C — IDoc (asynchronous messaging)
-
-SAP's classic EDI-style document format, dropped on a queue. Relevant message
-types: `MBGMCR` (goods movement create), `WMMBID01` (WM movements), `DELVRY03`
-(deliveries), `MATMAS` (material master broadcast), `PREQCR` (PR create).
-
-**Best for:** high volume, fire-and-forget, and for SAP *pushing* master data to us
-on change. Weak where a user is waiting for an answer on screen — it is
-asynchronous by design.
-
-### Option D — SAP BTP Integration Suite / CPI as middleware ★ the realistic shape
-
-Rather than our app talking to SAP directly, both talk to an integration layer that
-handles retries, mapping, monitoring and credentials.
-
-```
-PRC-WH App ──HTTPS/JSON──▶ Integration Suite (CPI) ──OData/RFC/IDoc──▶ SAP
-           ◀── webhook / scheduled pull ──                          ◀──
-                        (Cloud Connector if SAP is on-prem)
-```
-
-**Why this usually wins the argument:** the SAP team keeps control of the SAP side,
-gets monitoring and error handling they already know, and our app never holds SAP
-credentials or touches SAP directly. Push for this if they have BTP — it removes
-most of their objections in one move.
-
-### Option E — Excel / file exchange (the stopgap you proposed)
-
-Legitimate as **phase 0**, and worth building anyway as a permanent fallback for
-when the interface is down. Specified in §7.
-
-### Never propose these
-
-- **Direct database reads from SAP's HANA/Oracle tables.** Bypasses application
-  logic, breaks on upgrade, and is an indirect-access licensing exposure. If they
-  offer it, decline — it will be used against you later.
-- **Screen scraping / GUI scripting / BDC recordings** for ongoing interfaces. Fine
-  for one-off migration, never for a live integration.
-- **Writing to SAP tables** with anything but a BAPI or API. Not negotiable.
+- **We have no batch or serial number handling.** If any of our items are
+  batch- or serial-managed in B1, every posting must name a batch or serial, and
+  our app has no such field in the data, on the screens, or in the physical
+  process on the floor. This is one of the larger possible pieces of work in the
+  project and I want the answer in week one.
+- **Our floor-plan bay placement is modelled, not recorded.** If B1's bin
+  locations are enabled, real placement data already exists and our floor plan
+  should mirror it. If not, our floor plan is genuinely new information.
 
 ---
 
-## 5. The architecture to propose
+## 6. The bin location question — read this one carefully
+
+Business One 10 supports **bin locations** (`OBIN`): real, addressable storage
+positions inside a warehouse. This is the single question with the biggest effect
+on our floor-plan module, and it has three possible answers.
+
+- **Bin locations are enabled and populated for Taytay.** Then B1 already knows
+  where material sits, our modelled placement is redundant, and the right long-term
+  design is for the floor plan to *display* B1's bins rather than invent its own.
+  More work in the medium term, but the result is a floor plan that is factually
+  correct rather than illustrative — a genuine upgrade.
+- **Bin locations are enabled but not populated.** Then there is a real opportunity:
+  our app becomes the pleasant way to capture bin data that B1 wants anyway, and
+  we write placement back into B1. This is arguably the strongest single argument
+  for the app's existence.
+- **Bin locations are switched off.** Then our floor plan stands alone as
+  app-owned data, nothing in B1 conflicts with it, and we carry on as we are —
+  while noting that turning bins on later would change the picture.
+
+Ask explicitly: *"Is bin location management enabled for the Central Warehouse
+Taytay warehouse, and if so, is it actually populated?"*
+
+---
+
+## 7. Document types — Business One's model, not ECC's
+
+Business One does not use three-digit movement types. It uses **distinct document
+objects**, which is simpler and easier to reason about. Map each app action to one:
+
+| App action | B1 document | Notes |
+|---|---|---|
+| Receive against a purchase order | `PurchaseDeliveryNotes` (Goods Receipt PO) | Links to the PO, updates the open quantity |
+| Receive without a PO | `InventoryGenEntries` (Goods Receipt) | Needs an account or cost assignment |
+| Issue to a project or site | `InventoryGenExits` (Goods Issue) | Carries the project / cost centre on the line |
+| Move between warehouses or bins | `StockTransfers` | Quantity-neutral overall |
+| Scrap | `InventoryGenExits` to a scrap account | Same object, different account |
+| Flag as damaged | **Decision needed** — a separate warehouse, a bin, or a user-defined field | See below |
+| Cycle count | `InventoryCountings` then `InventoryPostings` | Two steps in B1 |
+| Request a purchase | `PurchaseRequests` | First in our rollout order |
+
+### Two rulings to force in the room
+
+- **Our `damaged_qty` column.** Business One has no built-in "blocked stock"
+  status equivalent to ECC's. The realistic options are a dedicated damaged
+  warehouse, a dedicated bin, or an app-only flag with no B1 representation. Each
+  is defensible; picking one silently is not.
+- **Our `reserved_qty` column.** B1 tracks a `Committed` quantity that comes from
+  open sales and transfer requests — it is not a free-form reservation anyone can
+  create. So our "reserved" either maps onto `InventoryTransferRequests`, or it
+  is an app-only soft hold that B1 never sees. **My recommendation is the transfer
+  request**, because it makes the commitment visible to everyone in B1 rather than
+  only to our users. But it is a business decision, not a technical one.
+
+These two columns are the most likely to be found "wrong" later, precisely
+because they look like B1 concepts and currently are not.
+
+---
+
+## 8. Preventing double-posting — and why this is easy here
+
+The most dangerous failure in any write integration is posting the same goods
+issue twice: our message goes out, the connection drops before the answer comes
+back, and we genuinely do not know whether B1 posted or not. Retrying might issue
+the material twice; not retrying might lose it entirely.
+
+**Business One solves this more easily than ECC did.** B1 lets an administrator
+add **user-defined fields (UDFs)** to standard objects with no programming at all.
+The design:
+
+1. IT adds one UDF — call it `U_PRCWH_REF` — to the inventory document objects.
+2. Every document our app creates writes our own unique reference into it.
+3. Before posting, our worker queries B1 for that reference. If a document
+   already carries it, the posting already happened and we record its `DocEntry`
+   instead of posting again.
+
+This costs IT about five minutes and it is the single highest-value small thing
+they can give us. It is also what makes reconciliation possible: every document in
+B1 that came from our app is traceable back to the action that created it.
+
+**Ask for it explicitly and get agreement that no other process will use that
+field.**
+
+---
+
+## 9. The architecture
 
 ```
   ┌──────────────────────┐
-  │  PRC-WH App (React)  │  user acts: issue, receive, reserve, request
+  │  PRC-WH App (React)  │  user acts: receive, issue, transfer, request
   └──────────┬───────────┘
-             │ Supabase client (RLS)
+             │ Supabase client (row-level security)
   ┌──────────▼───────────┐
-  │ Supabase Postgres    │  operational store + outbox table
-  │  + server worker     │  ← integration worker lives here
+  │ Supabase Postgres    │  operational store + outbox queue
   └──────────┬───────────┘
-             │ HTTPS, mTLS or OAuth2 client credentials
+             │
   ┌──────────▼───────────┐
-  │ SAP Integration Suite│  mapping, retry, alerting, monitoring
+  │  Integration worker  │  server-side; holds the B1 credentials,
+  │  (Node, server-side) │  manages the session, retries, logs
   └──────────┬───────────┘
-             │ (Cloud Connector, if on-prem)
+             │ HTTPS :50000  /b1s/v2/
   ┌──────────▼───────────┐
-  │        SAP           │  posts the document, returns the document number
+  │ B1 Service Layer     │
+  └──────────┬───────────┘
+  ┌──────────▼───────────┐
+  │ SAP Business One     │  posts the document, returns DocEntry + DocNum
   └──────────────────────┘
 ```
 
-### Five design rules to state as commitments
+### Five design rules, stated as commitments
 
-1. **Outbox pattern.** A user action writes a row to our DB *and* an `sap_outbox`
-   row in the same transaction. A worker drains the outbox. Nothing is ever posted
-   to SAP from a browser request path — the network will fail eventually, and the
-   user must not be the retry mechanism.
-2. **Idempotency.** Every outbound message carries a UUID we generate. SAP-side or
-   CPI-side logic must reject a duplicate rather than post twice. Ask them
-   explicitly how they want this enforced — double goods issues are the classic
-   integration disaster.
-3. **Write the SAP document number back.** Once SAP posts, we store `mblnr` /
-   `mjahr` (material document), `banfn` (PR) and so on against our row. A row with
-   no SAP number is *not done* — it is pending, and the UI must show that.
-4. **SAP wins on reconciliation.** A nightly job pulls stock on hand from SAP and
-   compares it against our `inventory`. A variance is reported as a variance —
-   never silently overwritten, never silently ignored. This one job is what makes
-   the "system of engagement" claim credible.
-5. **The read model is a cache, and says so.** We keep serving SAP-derived stock
-   from our own tables (that is what makes the app fast), but every screen carries
-   the as-of timestamp. Users must never be surprised about staleness.
+1. **Outbox pattern.** A user action writes the record *and* a queue entry in one
+   indivisible step. A background worker drains the queue. Nothing is ever posted
+   to B1 from a browser request, because a user who presses save twice must never
+   create two goods issues.
+2. **Idempotency via the UDF.** Every message carries a unique reference; we check
+   before posting and never post the same reference twice (§8).
+3. **Write the document identifiers back.** We store `DocEntry` and `DocNum`
+   against our record. A record with no B1 document number is **pending**, not
+   done, and the interface shows it that way.
+4. **B1 wins on reconciliation.** A nightly job pulls stock per item per warehouse
+   from B1 and compares it against ours, reporting every variance. It never
+   silently overwrites ours to match and never ignores a difference. This one job
+   is what makes the "system of engagement" claim provable.
+5. **The read model is a cache and says so.** We keep serving stock from our own
+   tables because that is what makes the app fast, but every screen carries the
+   as-of timestamp.
 
-### Sync direction per object (proposed — bring this for them to redline)
+### Credentials never touch the browser
 
-| Object | Direction | Mechanism | Frequency |
-|---|---|---|---|
-| Material master | SAP → App | delta pull or `MATMAS` IDoc | daily / on change |
-| Stock on hand | SAP → App | OData pull | 15 min, plus after each post |
-| Goods movement | App → SAP | `BAPI_GOODSMVT_CREATE` / OData | real-time (queued) |
-| Reservation | App → SAP | BAPI / OData | real-time (queued) |
-| Purchase requisition | App → SAP | BAPI / OData | real-time (queued) |
-| Purchase order status | SAP → App | pull | hourly |
-| Inbound deliveries | SAP → App | pull or `DELVRY03` | hourly |
-| Projects / WBS | SAP → App | pull | daily |
-| Bin / floor placement | App-owned | — | — |
-| Safekeeping custody | App-owned (until decided) | — | — |
+The B1 username and password live only on the server-side worker. The React app
+talks to our own database and never to B1. This is non-negotiable and it is also
+the answer to the first security question IT will ask.
 
 ---
 
-## 6. Movement types you will be asked about
+## 10. Sync direction per object (bring this for them to redline)
 
-When you say "the app records an outgoing", SAP hears "which movement type?".
-Have an answer for every app action.
-
-| Mvt | Meaning | Our action |
+| Object | Direction | Frequency |
 |---|---|---|
-| `101` / `102` | Goods receipt against PO / reversal | Incoming from a delivery |
-| `201` / `202` | Issue to cost centre / reversal | Consumable issue |
-| `221` / `222` | Issue to project (WBS) / reversal | **Issue to a site — most of our outgoing** |
-| `261` / `262` | Issue to production or maintenance order | If PP/PM orders are used |
-| `301` | Plant-to-plant transfer | Site transfer |
-| `311` | Storage location transfer within a plant | Move between CW areas |
-| `309` | Material-to-material transfer | Re-grading |
-| `551` | Scrapping | **The Scrap tab** |
-| `344` / `343` | Unrestricted → blocked / released | **Damaged quantity flagged / released** |
-| `561` | Initial stock upload | One-time cutover only |
-| `701` / `702` | Physical inventory difference | Cycle count |
-
-**Two decisions to force in the room.** Does our `damaged_qty` correspond to SAP
-*blocked stock* (`344`), to quality inspection stock, or is it an app-side note
-only? And is `reserved_qty` an SAP reservation (`RESB`), a project commitment, or
-an app-only soft hold? These two columns are the most likely to be found "wrong"
-later, because they look like SAP concepts and currently are not.
+| Item master | B1 → App | daily, or on change |
+| Stock per item per warehouse | B1 → App | every 15 min, plus immediately after any post |
+| Warehouses / bin locations | B1 → App | daily |
+| Goods receipt / issue / transfer | **App → B1** | real-time, queued |
+| Purchase request | **App → B1** | real-time, queued |
+| Purchase order status | B1 → App | hourly |
+| Expected deliveries | B1 → App | hourly |
+| Projects / cost centres | B1 → App | daily |
+| Floor plan placement | App-owned, unless bins are enabled (§6) | — |
+| Photos, condition grading, custody log | App-owned | — |
 
 ---
 
-## 7. The Excel stopgap — spec it so it does not become permanent by accident
+## 11. What I need from IT — the requisition
 
-Build it, but with an expiry date and a design the API phase reuses.
+### Tier one: nothing starts without these
 
-**Outbound (App → SAP).** One file per document type, in the exact column order of
-the upload the specialists nominate. Ask which they want:
+- **Confirmation that the Service Layer is installed and running**, plus its exact
+  base URL and port, and which protocol path (`/b1s/v2/` preferred).
+- **Port 50000 opened to our server's outbound address.** Browser Access being
+  open on 8200 does not mean 50000 is. This is a firewall rule, not a project.
+  I will supply the fixed address.
+- **The company database name** — required in every login call.
+- **A dedicated B1 user for the integration**, with permission to create the
+  document types we need, and confirmation of which licence it consumes.
+- **A test company database** to work against, so we are never creating
+  experimental goods issues in the live books. If none exists, ask what it takes
+  to create one.
+- **One named person** who owns this interface and will answer when a posting
+  returns an error I do not recognise — which will happen in the first week and
+  roughly weekly after that.
 
-- A file the **SAP Migration Cockpit** (`LTMC` / `LTMOM` on S/4) can consume — it
-  has published XLSX templates. Best answer.
-- A file for a **custom BDC/LSMW-style recording** they already maintain.
-- A flat file dropped on **SFTP** and picked up by a scheduled SAP job. Cleanest
-  stopgap, because the *transport* is already automatic — only the parsing is
-  manual — and it upgrades to an API with no change to the warehouse team's
-  routine.
+### Tier two: configuration facts I cannot guess
 
-**Inbound (SAP → App).** Ask for a scheduled SAP job that writes `MB52` (stock),
-`MB51` (movements) and open PO data to SFTP as CSV nightly. Our importer reads it.
-This is easy for them to say yes to, and gets us real data in weeks.
+- **The warehouse code(s) for Central Warehouse Taytay**, and whether safekeeping
+  is a separate warehouse.
+- **Whether bin location management is enabled** for those warehouses, and whether
+  it is populated (§6).
+- **Whether batch or serial management is switched on** for our items.
+- **An item master extract** — item code, description, item group, base UoM,
+  inventory/purchase/sales flags, batch or serial setting — so I can compare
+  against our 7,378 rows and find out whether we share a coding scheme.
+- **How projects are tracked** — the `Projects` object, profit centres, or
+  dimensions — and the codes for Avesta Residences, Southscapes, the three 4PH
+  projects and any others.
+- **The valid units of measure**, so I can normalise ours onto theirs.
+- **Whether the database is HANA or SQL Server** (affects some query options).
 
-**Rules so the stopgap stays a stopgap:**
+### Tier three: what makes it reliable rather than merely working
 
-- Files are generated by code, never hand-edited. A hand-edited file is a data
-  quality incident waiting to happen.
-- Every file carries a schema version and generation timestamp in its header.
-- Every exported document carries our UUID in a reference field, so the API phase
-  can reconcile what was already posted.
-- The exporter writes to the **same `sap_outbox` table** the API worker will later
-  drain. Then switching from file to API is a change of worker, not a change of
-  app.
+- **One worked example of each document we will create**, exported from their
+  system, so I can copy the exact shape rather than guess which fields their
+  configuration requires. A goods receipt, a goods issue to a project, a stock
+  transfer and a purchase request cover everything.
+- **Permission to add one user-defined field** for our reference key (§8), and
+  agreement that nothing else will use it.
+- **The agreed reversal method** for each document type, so our "undo" behaves the
+  way their accountants expect. B1 cancels rather than deletes, and I need to know
+  which mechanism they want.
+- **Session and concurrency limits** — how many simultaneous Service Layer
+  sessions we may hold, and any nightly backup or maintenance window to avoid.
+- **What we must demonstrate to earn write access to the live company.** Ask for
+  their gate criteria at the *start*, so we build against them rather than
+  discovering them at the end.
 
----
+### The five to get if the meeting runs short
 
-## 8. Commercial and licensing — do not skip this
+Service Layer confirmed and reachable · port 50000 opened to our address ·
+company database name · an integration user · a test company.
 
-This is where integration projects die quietly, six months in.
-
-- **SAP Digital Access / indirect access.** Under the Digital Access model,
-  documents *created in SAP by a non-SAP system* are licensed by document count.
-  Whether material documents and goods movements are chargeable depends on the
-  contract vintage. **Ask directly, and get it in writing:** *"If the warehouse app
-  creates N material documents and M purchase requisitions per month via API, does
-  that consume Digital Access document budget, and what is our headroom?"*
-- **Named user licences.** Warehouse staff who only ever use our app may not need
-  an SAP named-user licence. That is a real saving and your strongest commercial
-  argument for the project — get their licensing person to confirm it.
-- **BTP Integration Suite** is separately licensed if they do not already own it.
-- **SAP Cloud Connector** is free, but needs a host and an owner.
-
----
-
-## 9. Security and operations — what they will demand
-
-- **Authentication:** OAuth 2.0 client credentials via a BTP destination is the
-  modern answer; X.509 certificates or a technical user with basic auth is the
-  common on-prem reality. Never a personal user's credentials.
-- **Authorisation:** the technical user gets exactly the authorisation objects it
-  needs (`M_MSEG_WMB`, `M_MSEG_BWA`, `M_BANF_BSA`, plus plant/sloc restriction),
-  scoped to the CW Taytay plant and storage location only.
-- **Network path:** if SAP is on-prem, our worker cannot live on GitHub Pages. It
-  needs a host the Cloud Connector or VPN can reach. Raise this early — it is a
-  real infrastructure ask.
-- **Audit:** every SAP call logged with who triggered it, the payload, the response
-  and a correlation ID. We already have an append-only `audit_log` with no update
-  or delete policy at all — say so, it lands well.
-- **Error handling:** who gets paged when a posting fails? Proposal — failures
-  surface in the app as a queue an admin can see and retry, and alert the SAP basis
-  team if the failure is systemic.
-- **Data residency / PII:** the app holds no personal data beyond staff emails.
-  Stating this shortens the security review.
+Those five take us from zero to real read-write calls. Everything else is detail
+that can follow in a second conversation.
 
 ---
 
-## 10. The workflow to proceed
+## 12. Licensing
 
-### Phase 0 — Discovery (this meeting + 2 weeks)
-- Answer all ten questions in §2.
-- Get read-only access to a **non-production** SAP for one developer.
-- Obtain plant/sloc codes, a material master extract, the movement types in use,
-  and one sample of each document type we intend to create.
-- **Gate:** we can name the exact API or BAPI for each of our write actions.
+Business One licenses differently from ECC, and mostly in our favour — but there
+is still a question that needs a real answer.
 
-### Phase 1 — Read-only integration (4–6 weeks)
-- Pull material master, stock on hand, open POs, inbound deliveries.
-- Dashboards render live SAP data. Nothing is written anywhere.
-- **This is the phase that wins support** — zero risk to them, and the day the
-  floor plan and dashboards show real SAP stock, the project becomes obviously
-  worth funding.
-- **Gate:** reconciliation shows zero variance against `MB52` for 10 consecutive
-  days.
-
-### Phase 2 — File-based writes (parallel with Phase 1, 2–3 weeks)
-- Build the exporter and the `sap_outbox` table.
-- Warehouse team works in the app; a scheduled job (or a person) feeds SAP.
-- **Gate:** one full month of operations captured in the app first and SAP second,
-  with no reconciliation drift.
-
-### Phase 3 — API writes, one document type at a time (6–12 weeks)
-Ordered by blast radius, lowest first:
-
-1. **Purchase requisition** — an unapproved PR does no harm if it is wrong.
-2. **Reservation** — soft commitment, reversible.
-3. **Transfer posting (`311`)** — moves stock, does not change the total.
-4. **Goods receipt (`101`)** — increases stock; needs the PO link right.
-5. **Goods issue (`221`/`201`)** — decreases stock and hits project cost. Last.
-
-Each with: build → test with the SAP team watching → a two-week parallel run where
-both app and manual SAP entry happen and are compared → cutover.
-**Gate per document type:** 100 consecutive postings with correct document numbers
-returned and zero duplicates.
-
-### Phase 4 — Retire the manual path, formalise operations
-Runbook, monitoring, on-call, quarterly reconciliation review. Decide the long-term
-home for bin/floor data (app-owned, or migrated into EWM).
-
-### Deliberately not in scope
-Say this out loud so nobody assumes otherwise: the app is not replacing SAP's
-financial postings, procurement approval strategy, vendor management, or period
-close. It is a warehouse front end.
+- **Ask:** does a Service Layer connection consume a named-user licence, do we
+  need a dedicated licence for the integration account, and what is the limit on
+  concurrent sessions? Our worker will hold a session while it drains the queue.
+- **The counter-argument, which is strong here:** warehouse staff who only ever
+  use our app may not need Business One licences at all. On B1's per-named-user
+  pricing that is a direct, calculable saving. **Ask IT to quantify it** — it may
+  fund the whole project by itself, and it is the most persuasive number you can
+  walk out of that room with.
+- Confirm who holds the **SAP maintenance contract**, in case something needs
+  escalating to SAP or to the implementing partner.
 
 ---
 
-## 11. What to ask them for, concretely (the shopping list)
+## 13. Security and operations — what IT will want to hear
 
-Hand this over at the end of the meeting.
-
-1. SAP release, deployment model, active module list.
-2. A named SAP counterpart who owns this interface.
-3. A **technical/communication user** on the DEV or QAS system.
-4. The **plant code** and **storage location code(s)** for CW Taytay.
-5. A material master extract for those storage locations, to reconcile against our
-   7,378 `item_master` rows.
-6. The list of **movement types** the warehouse is authorised to use.
-7. Confirmation of whether **batch management** applies to our materials.
-8. Whether **BTP Integration Suite / PI / another ESB** exists, and whether we
-   route through it.
-9. Their **standard for authentication** to SAP APIs.
-10. Whether **Gateway / OData services** are activated, and how to request specific
-    ones.
-11. Their answer on **Digital Access licensing** for API-created documents.
-12. The **transport lead time** and change-window policy.
-13. Their preferred **file format and transport** for the Phase-2 stopgap.
-14. The **existing warehouse process documentation** — what transactions do the
-    warehouse staff actually run today (`MIGO`, `MB1A`, `MB1B`, `MB21`, `ME51N`,
-    `MB52`)? Our app has to cover every one a user touches.
+- **Credentials live only server-side.** The browser never sees a B1 password and
+  never talks to B1.
+- **Least privilege.** The integration user gets permission for exactly the
+  document types we create, in the Taytay warehouse, and nothing else.
+- **Network.** Port 50000 restricted to our server's address, not open to the
+  world. HTTPS with a valid certificate.
+- **Audit.** Every call logged with who triggered it, the payload, the response
+  and a correlation reference. Our `audit_log` table already has no update or
+  delete policy at all — say so, it lands well.
+- **Failure handling.** Failed postings surface in the app as a queue an
+  administrator can see and retry, and IT gets alerted if failures are systemic
+  rather than one-off.
+- **No personal data** beyond staff email addresses. Stating this shortens the
+  security review.
 
 ---
 
-## 12. Questions they will ask you — have answers ready
+## 14. The workflow forward
 
-| Their question | Your answer |
-|---|---|
-| "Where does the data live?" | Supabase Postgres (managed, RLS on every table). SAP-derived data is a cache; SAP remains source of truth. |
-| "Who can write to it?" | Row-level security per role, admin-only on reference tables, and `audit_log` is append-only with no update or delete policy at all. |
-| "What happens if SAP is down?" | Users keep working; postings queue in the outbox and drain when SAP returns. Screens show the as-of timestamp. |
-| "What if the app and SAP disagree?" | SAP wins. Nightly reconciliation reports the variance; we never silently overwrite. |
-| "Will this create duplicate postings?" | Every message carries an idempotency UUID and we store the returned SAP document number. A row without one is not complete. |
-| "Who supports it?" | Name someone. This question has no technical answer and always gets asked. |
-| "Why not just use Fiori?" | Fiori covers the SAP transactions; it does not cover the floor plan, condition grading, safekeeping custody, delivery coordination, or the analytics the warehouse team asked for. And this is additive — it removes no Fiori app. |
-| "Is this on the internet?" | Today it is a GitHub Pages site protected by Supabase auth and RLS. Expect them to require a move behind corporate SSO once it touches production data — see §13. |
+### Phase 0 — Discovery (this meeting, plus about two weeks)
+Answers to §11, an integration user on a test company, and the item master
+extract. **Gate:** we can name the exact Service Layer object and the exact fields
+for each thing our app needs to do.
 
----
+### Phase 1 — Read-write against the test company (roughly 3–5 weeks)
+Stand up the server-side worker, the outbox queue, the session handling, the
+translation layer and the reconciliation job. Exercise all of it — real postings,
+real document numbers, real errors — in a system where a mistake harms nothing.
+In parallel the **read** side goes live for real: dashboards and floor plan start
+showing current B1 stock instead of a loaded snapshot.
+**Gate:** reconciliation reports zero variance for ten consecutive days, and a
+hundred consecutive test postings return correct document numbers with no
+duplicates.
 
-## 13. Things to fix on our side, before or alongside integration
+### Phase 2 — File exchange as the fallback (2 weeks, parallel)
+Build the export from the same queue the worker drains, so switching between file
+and live connection changes nothing in the app and nothing in the warehouse team's
+routine. Keep it permanently as the thing that runs when the connection is down.
 
-Be the one who raises these; it buys credibility.
+### Phase 3 — Live company, one document type at a time (6–10 weeks)
+Ordered by how much damage a mistake causes:
 
-- **Hosting.** A public GitHub Pages site will not survive an SAP security review
-  once it touches production data. Plan a move to a host behind corporate SSO
-  (Entra ID), which also enables principal propagation to SAP.
-- **A backend.** RFC and most SAP auth flows cannot happen in a browser. We need a
-  server-side component.
-- **Writes are not implemented yet.** Add Material and movement entry are
-  read-only UI today; only safekeeping requests persist. The app's Phase 3 and this
-  integration's Phase 1 are the same work — sequence them together rather than
-  building app-only writes that later need reworking.
-- **No CI, no tests, no error boundary.** An interface to a system of record needs
-  a test suite and a staging environment. Raise it as a cost line now.
-- **Identity.** For SAP audit trails to mean anything, the posting should carry who
-  did it — via principal propagation, or by writing the user into a reference field
-  on the document. Ask which they prefer.
-- **Item code alignment.** If our codes are not SAP material numbers, the mapping
-  table is permanent infrastructure and needs an owner.
+1. **Purchase request** — an unapproved request harms nothing.
+2. **Stock transfer** — moves material, does not change the total.
+3. **Goods receipt** — increases stock.
+4. **Goods issue** — decreases stock and charges project cost. **Last.**
 
----
+Each one: built, tested with IT watching, then a two-week parallel run where the
+same transaction is entered both in the app and manually in B1 and compared line
+by line. Only then does manual entry stop for that document type.
 
-## 14. Meeting agenda (60–90 minutes)
-
-1. **5 min** — Frame it: system of record vs system of engagement (§1).
-2. **10 min** — Show the app. Floor plan, dashboards, delivery tracker. Let it sell
-   itself; do not lead with architecture.
-3. **10 min** — Present the responsibility split (§1) and invite redlines.
-4. **20 min** — Their landscape: work through the ten questions in §2.
-5. **15 min** — The options menu (§4). Let *them* choose the mechanism.
-6. **10 min** — Phasing (§10) and the licensing question (§8).
-7. **10 min** — Shopping list (§11), named owners, next meeting date.
-
-**Leave with three things or the meeting failed:** a named SAP counterpart, a
-decision on the integration mechanism, and a date for non-production access.
+### Phase 4 — Operations
+Runbook, monitoring, on-call, quarterly reconciliation review, and the decision on
+the long-term home for floor-plan placement data (§6).
 
 ---
 
-## 15. Glossary — so nothing said in the room goes past you
+## 15. What has to change on our side regardless
 
-- **BAPI** — a documented, stable function you are allowed to call to make SAP do
-  something. The supported way in.
-- **RFC** — SAP's remote procedure call protocol; how BAPIs are reached.
-- **IDoc** — a structured document format for asynchronous exchange.
-- **OData** — the REST-style API standard SAP uses for modern services.
-- **Gateway** — the SAP component that publishes OData services.
-- **BTP** — SAP Business Technology Platform, their cloud PaaS.
-- **Integration Suite / CPI** — SAP's integration middleware on BTP.
-- **Cloud Connector** — secure tunnel from BTP to an on-premise SAP.
-- **CDS view** — a modelled data view in S/4HANA; usually the basis for an OData
-  service, and the cleanest way to expose a custom read.
-- **S/4HANA vs ECC** — current vs previous generation of SAP ERP.
-- **RISE** — SAP-managed hosting of S/4HANA.
-- **Plant / Storage location** — the physical hierarchy stock sits in. Ours must be
-  identified precisely.
-- **Movement type** — the three-digit code classifying every stock movement (§6).
-- **Fiori** — SAP's modern web UI layer.
-- **Digital Access** — SAP's licensing model for documents created by non-SAP
-  systems (§8).
-- **Transport** — the mechanism for moving a change from DEV to PROD in SAP.
-  Explains why SAP-side changes are never same-day.
+- **The app needs a server.** Today it is a browser application talking to a
+  database. Holding B1 credentials and draining a queue requires a server-side
+  component. New infrastructure, with an owner and a cost.
+- **The hosting has to move.** The app currently sits on a free public service.
+  That was correct for a prototype showing a snapshot; it is not defensible once
+  the app holds a live connection into the company's ERP. Better we move it than
+  be told to.
+- **Automated tests and a staging environment.** The app has no tests today, which
+  was fine when the worst outcome was a chart drawn wrongly. Once it can move
+  stock in the company's books, it is not. Budget line now, not a surprise later.
+- **The write screens get built once, correctly.** "Save to our database" and
+  "post a B1 document and record what comes back" are structurally different
+  operations. Building the first and converting it later means reopening every
+  screen; building it right costs the same and takes no longer — it just needs the
+  answers first. **This is why the meeting has to happen before the build.**
+
+---
+
+## 16. Meeting agenda (60–90 minutes)
+
+1. **5 min** — Framing: system of record vs system of engagement (§2).
+2. **10 min** — Show the app. Floor plan, dashboards, delivery tracker. Let it
+   sell itself; do not lead with architecture.
+3. **10 min** — The responsibility split (§2), invite redlines.
+4. **10 min** — Confirm the landscape: version, database, company databases,
+   whether a test company exists (§1).
+5. **10 min** — **Is the Service Layer enabled, and can port 50000 be opened?**
+   The single most important question in the meeting (§3).
+6. **15 min** — Configuration facts: warehouses, bins, batches, projects (§11).
+7. **10 min** — The UDF for our reference key (§8) and the two rulings on damaged
+   and reserved stock (§7).
+8. **10 min** — Phasing (§14), licensing (§12), named owner and next date.
+
+**Leave with three things or the meeting failed:** a named counterpart, a yes or
+no on the Service Layer, and a date for credentials on a test company.
+
+---
+
+## 17. Glossary
+
+- **SAP Business One (B1)** — SAP's product for small and mid-sized companies. A
+  separate product from ECC and S/4HANA, with its own database and vocabulary.
+- **Browser Access** — the service that streams the Windows B1 client into a
+  browser. This is what the `:8200/dispatcher/` URL is.
+- **Web Client** — B1 10's newer native web interface. Distinct from Browser
+  Access; not relevant to our integration.
+- **Service Layer** — B1's REST/OData web API. Read-write, built in, and the route
+  we want.
+- **DI API** — the older Windows-only programming interface. Cannot be used from a
+  web application.
+- **DI Server** — a SOAP wrapper around the DI API. Acceptable fallback.
+- **B1if** — B1's bundled integration middleware, included at no extra cost.
+- **OData** — the web-service standard the Service Layer speaks. Lets us request
+  precisely the rows and columns we need.
+- **Company database** — B1 can host several companies on one server, each in its
+  own database. Every login names one explicitly.
+- **SLD (System Landscape Directory)** — B1's registry of servers, databases and
+  services. Where the Service Layer is configured.
+- **Item** (`OITM`) — B1's item master record.
+- **Warehouse** (`OWHS`) — a stock-holding location. B1's equivalent of ECC's
+  plant and storage location combined, and simpler.
+- **Bin location** (`OBIN`) — an addressable position inside a warehouse (§6).
+- **Goods Receipt** (`InventoryGenEntries` / `OIGN`) — stock in without a PO.
+- **Goods Issue** (`InventoryGenExits` / `OIGE`) — stock out.
+- **Stock Transfer** (`OWTR`) — movement between warehouses or bins.
+- **Goods Receipt PO** (`PurchaseDeliveryNotes` / `OPDN`) — receipt against a PO.
+- **Purchase Request** (`OPRQ`) — internal request to buy, before it becomes a PO.
+- **DocEntry / DocNum** — a document's internal key and its human-visible number.
+  We store both as proof of every posting.
+- **UDF (User-Defined Field)** — a custom field an administrator can add to a
+  standard B1 object with no programming. How we solve duplicate prevention (§8).
+- **Committed quantity** — B1's own figure for stock spoken for by open documents.
+  Relevant to what our "reserved" column should mean (§7).
+- **Idempotency** — the property that sending the same message twice has the same
+  effect as sending it once. The most important safety property in the project.
+- **Outbox pattern** — recording the intent to post in a queue, so the user is
+  never made into the retry mechanism.
+- **Reconciliation** — the nightly comparison of B1's stock against ours, which
+  reports variances rather than hiding them.
+
+---
+
+## Appendix — References
+
+- [SAP Business One Service Layer API Reference](https://help.sap.com/doc/056f69366b5345a386bb8149f1700c19/10.0/en-US/Service%20Layer%20API%20Reference.html)
+- [Service Layer v1 vs v2 (OData v3 vs v4)](https://sap-b1-blog.com/en/glossary/service-layer-v1-vs-v2/)
+- [SAP Business One API integration guide](https://www.apideck.com/blog/sap-business-one-api-integration-guide)
+- [How to Deploy SAP Business One with Browser Access](https://help.sap.com/doc/37bc0ffc0cdf48d08923360b4b43881b/10.0/en-US/How_to_Deploy_SAP_Business_One_with_Browser_Access.pdf)

@@ -1811,3 +1811,38 @@ Two app-side facts recorded there because they will surface in that meeting: a
 public GitHub Pages site will not survive an SAP security review once it touches
 production data, and RFC/most SAP auth flows need a server-side component the app
 does not currently have.
+
+### 2026-08-25 — Session: SAP brief rewritten for Business One
+
+The first draft of `docs/sap-integration-brief.md` aimed at ECC/S4HANA. Megawide
+actually runs **SAP Business One 10**, reached at
+`https://sapcloudv10-02.megawide.com.ph:8200/dispatcher/` — the `/dispatcher/` path
+on a high port is B1 **Browser Access** (documented default 8100), and `sapcloudv10`
+names the version. Different product, different database, different vocabulary, so
+the document was rewritten rather than amended.
+
+Discarded as wrong-product: BAPI, RFC, IDoc, SAP Gateway, ABAP transports, the
+Cloud Connector, movement types (101/221/311), `MARA`/`MARD`/`MSEG`/`EBAN`, and the
+Digital Access licensing model.
+
+The replacement answer is the **Service Layer** — B1 ships a REST/OData v4 API on
+port 50000 at `/b1s/v2/` that already does read AND write on every object we need,
+so nothing has to be built on the SAP side. That collapses the timeline and makes
+the read-write connection (now the stated requirement) available from day one
+rather than after a read-only phase.
+
+Rewritten around B1 objects: `Items`/`OITM`, `ItemWarehouseInfoCollection` for
+stock, `InventoryGenEntries` (goods receipt), `InventoryGenExits` (goods issue),
+`StockTransfers`, `PurchaseDeliveryNotes`, `PurchaseRequests`, `Warehouses`,
+`BinLocations`. Three new decisions the meeting has to settle: whether bin location
+management is enabled (it determines whether our floor plan mirrors B1 or stands
+alone), what `damaged_qty` maps to (B1 has no blocked-stock status), and whether
+`reserved_qty` becomes an `InventoryTransferRequest` or stays an app-only hold.
+
+Duplicate-posting prevention is now easy: B1 lets an admin add a **user-defined
+field** with no programming, so we write our own reference onto every document and
+check it before posting. Five minutes of their time, and it is also what makes
+per-document reconciliation possible.
+
+Audience corrected too — the meeting is with Megawide IT’s in-house SAP team, not
+an external reseller, so the partner-billing framing was dropped.

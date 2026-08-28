@@ -124,6 +124,31 @@ export function DetailPanel({ node, onClose, emptyHint }) {
   )
 }
 
+// One row that scans in a glance and expands for the detail.
+//
+// WHY: the first version of this module gave every vulnerability, every data-flow
+// trace and every role its own full card. Nine bordered cards each holding two more
+// coloured blocks made the Security view 4,400 pixels of stacked frames — accurate,
+// and not something anybody would read. An executive wants the list first and the
+// argument on request, so these are rows in ONE card: a status mark, a title, a
+// one-line summary, and the rest behind a click.
+export function ExpandRow({ open, onToggle, mark, title, note, right, children }) {
+  return (
+    <div className={`pf-exp ${open ? 'open' : ''}`}>
+      <button className="pf-exp-head" onClick={onToggle} aria-expanded={open}>
+        <span className="pf-exp-mark">{mark}</span>
+        <span className="pf-exp-main">
+          <span className="pf-exp-title">{title}</span>
+          {note && <span className="pf-exp-note">{note}</span>}
+        </span>
+        {right}
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} className="pf-exp-caret" />
+      </button>
+      {open && <div className="pf-exp-body">{children}</div>}
+    </div>
+  )
+}
+
 // A plain heading row used between sections inside a view. The app's Card component
 // carries a border and a background; several of these sections are lists of cards, so
 // they need a label without a second frame around it.

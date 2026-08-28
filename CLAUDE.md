@@ -2071,3 +2071,95 @@ figure above is a DOM measurement.
 of it, which is Phase 3 and a much larger change. The guided tour's Insights step still
 describes the ABC analysis chart that an earlier session deleted — spun off separately
 rather than fixed here.
+
+### 2026-08-25 — Session: Process Flow made executive-ready — arrows, density, alignment
+
+Feedback on the module as first built: too many words, too much happening at once, not
+executive-level, alignments off, arrows confusing. All four were fair. The arrows were
+two separate bugs and both were mine.
+
+**Arrow bug 1 — proposals were drawn inside the chain.** The journey put my
+recommendations (single sign-on, a second factor, a narrower data load) as parallel
+boxes beside the real steps, and the "look something up" branch skipped three stages to
+reach Reporting. Result: 24 boxes, 26 arrows, branches converging and one long arrow
+crossing three rows. The journey is now **strictly sequential** — 18 stages, one box
+each, 17 arrows, no forks and no skips. Colour alone carries where it breaks, which is
+what a reader actually scans for. The four proposals moved to `JOURNEY_RECOMMENDATIONS`
+and are LISTED beside the diagram rather than drawn in it: a dotted box next to a real
+step reads as though the step already has an alternative.
+
+**Arrow bug 2 — and the more interesting one. Arrows were joining BOXES when they
+should have joined STAGES.** Connecting every box to every box in the next stage looked
+reasonable and produced a mess: two boxes followed by two more gives four arrows in an
+X, and Warehouse operations reached **18 arrows for 11 boxes**. The real error was
+semantic, not visual — the boxes inside one stage are not steps that follow one another,
+they are the aspects of that stage (Receiving holds the warehouse receipt AND the
+safekeeping receipt). Arrows between them asserted an order that does not exist. Edges
+are now stage-to-stage, one per transition, measured from the group's own bounding
+faces. Warehouse went 18 arrows → 5. Every diagram is now exactly (stages − 1) arrows,
+and every single one measured **straight, zero curved, zero crossings possible**.
+
+`edgePath` also draws a straight line whenever the two faces align rather than always
+curving: a bezier between two boxes sitting directly under one another bulges for no
+reason and reads as though it is going somewhere.
+
+**Alignment bug — stage titles sat in the arrow gap.** Reading down, each title was
+placed in the gap ABOVE its row, which is precisely where the connector runs: every
+arrow was drawn through a line of text. Titles moved into a left-hand **gutter**
+(104 units), right-aligned against the box column. Measured after: all 18 boxes share
+ONE left edge, all 18 titles share ONE right edge, zero titles intrude into the box
+column, zero arrows cross text. The vertical layout now reads as a timeline, and the
+content narrowed from 462 to 344 units so it fits a desktop column at 100%.
+
+**Alignment bug — the severity chips.** `min-width: 62px` is not a fixed width, and
+"medium" needed 66.9px, so its three rows pushed their titles 5px right of the other
+six — nine findings with two title columns. Now a fixed 72px. Measured: one mark
+column, one title column, one caret column.
+
+**Density — three long views became scan-first.** New `ExpandRow`: one card, N rows,
+each a status mark, a title, a one-line summary, and the argument behind a click. Nine
+bordered vulnerability cards each holding two more coloured blocks made Security 4,400
+pixels of stacked frames — accurate, and not something anybody would read.
+- Security **4,422 → 2,229 px**, 12 cards → 4
+- Data Flow **2,881 → 1,078 px**, 6 cards → 1 (first trace open, rest closed)
+- Access **3,576 → 1,515 px**, 6 cards → 2
+Each carries its own Expand all / Collapse all.
+
+**Words — cut roughly in half.** House style is now recorded at the top of
+`processFlow.js`: one sentence per `detail`, under about 140 characters, written for an
+executive reader; if a point needs a paragraph it belongs in the changelog, not on the
+page. The opening lede went from four lines explaining the four statuses — which the
+legend directly below already does — to one sentence. Legend descriptions are one short
+line each. The provenance footer, the ERD note, the access intro, the vulnerability
+intro and the public-repo notice were all trimmed. The journey view now renders 470
+visible words against roughly 1,100 before, and the module's lazy chunk fell
+**193 KB → 164 KB** (43 → 34 KB gzipped) on prose alone.
+
+The header strip leads with the five figures that matter — tables, routes, policies,
+1 of 7 transactional tables ever written to, 3 high-severity findings — instead of file
+and line counts.
+
+**Two lists replaced two cards.** "Where it breaks" and "Proposed additions" sit side by
+side under the journey as plain rows (`.pf-mini`), not bordered mini-cards: six boxes
+inside a card inside a page was three frames deep. Both counts are derived.
+
+**Mobile fix found while verifying:** `.pf-two` kept two columns at 375px, giving two
+~160px columns narrower than the sentences in them. Now stacks under 900px. The expand
+rows drop their status chip and tighten their padding on a phone so the title keeps the
+width.
+
+**Verified** at 1280×720 and 375×812, light and dark, across all eight views. Journey:
+18 boxes, 17 arrows, 17 straight, 0 curved, 8 dashed, 100% zoom on desktop and 91% on a
+phone, one box column, one title column, zero clipped labels, zero overlaps. All six
+process diagrams: edges exactly stages−1, all straight. Card head heights uniform at
+59px on every view. Zero overflowing elements and zero page horizontal scroll on any
+view at either width. Security rows measured uniform after the chip fix; expanding a row
+swaps the one-line summary for detail, verify, fix and evidence. Contrast unchanged —
+this module's own CSS still clears AA in both themes; the only failures remain shared app
+chrome (white on brand red, 4.12:1) that appears on every dashboard screen. No console
+errors on a fresh tab. `npm run build` passes.
+
+**Measurement note.** The stale-console trap bit again: `edgesFor is not defined` and
+`nodeById is not defined` kept reappearing from the intermediate edit states long after
+the build was clean, because the console buffer survives hard navigation. A fresh tab is
+what settles it — that is now three sessions in a row.

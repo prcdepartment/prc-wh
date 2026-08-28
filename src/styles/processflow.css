@@ -82,6 +82,7 @@
 }
 .pf-header-stats b { color: var(--text); font-weight: 800; font-size: 13px; }
 .pf-header-stats .warn b { color: var(--ink-warn); }
+.pf-header-stats .bad b { color: var(--ink-danger); }
 
 /* ---------- legend ---------- */
 .pf-legend {
@@ -273,7 +274,14 @@
   color: var(--text-faint); padding: 0 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.pf-stage-label.v { justify-content: flex-start; }
+/* Reading down, the title sits in the left gutter and is right-aligned against the
+   box column, so the labels form a straight edge and the boxes form another. Wraps
+   to two lines rather than ellipsising — the gutter is fixed and some titles are
+   two words. */
+.pf-stage-label.v {
+  justify-content: flex-end; text-align: right; white-space: normal;
+  line-height: 1.25; padding-right: 8px;
+}
 
 .pf-node {
   position: absolute; display: flex; flex-direction: column; gap: 4px;
@@ -351,16 +359,24 @@
 .pf-evidence-row .pf-path { display: inline-block; white-space: normal; word-break: break-all; }
 .pf-evidence-note { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
 
-/* ---------- journey: the break-points card ---------- */
-.pf-break-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
-.pf-break {
-  background: var(--surface-2); border: 1px solid var(--border);
-  border-left: 3px solid var(--tone); border-radius: var(--radius); padding: 10px 12px;
+/* ---------- two cards abreast ---------- */
+.pf-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+
+/* ---------- compact list rows ----------
+   Replaces the bordered mini-cards these lists used to be. Six bordered boxes inside
+   a bordered card inside a bordered page was three frames deep and read as clutter;
+   a status dot and two lines of text say the same thing. */
+.pf-mini { display: flex; flex-direction: column; }
+.pf-mini-row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 9px;
+  align-items: start; padding: 8px 0; border-bottom: 1px solid var(--border);
 }
-.pf-break-head { display: flex; align-items: center; gap: 7px; }
-.pf-break-title { font-size: 12.5px; font-weight: 700; }
-.pf-break-missing { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
-.pf-break .pf-evidence { border-top-color: var(--border); }
+.pf-mini-row:first-child { padding-top: 0; }
+.pf-mini-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.pf-mini-row .pf-dot { margin-top: 4px; }
+.pf-mini-title { display: block; font-size: 12.5px; font-weight: 700; line-height: 1.35; }
+.pf-mini-title em { font-style: normal; font-weight: 600; color: var(--text-faint); font-size: 11px; }
+.pf-mini-note { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 
 /* ---------- processes ---------- */
 .pf-proc-right { display: flex; align-items: center; gap: 8px; }
@@ -559,6 +575,30 @@
 .pf-probe-warn.strong b { color: var(--text); }
 .pf-probe-foot { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-faint); }
 
+/* ---------- expandable rows ----------
+   The scan-first pattern used by Security, Data Flow and Access. One card, N rows,
+   detail on demand. Replaced N full cards each carrying its own frame. */
+.pf-exp-list { display: flex; flex-direction: column; }
+.pf-exp { border-bottom: 1px solid var(--border); }
+.pf-exp:last-child { border-bottom: 0; }
+.pf-exp-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center; gap: 12px; width: 100%;
+  padding: 12px 16px; border: 0; background: transparent; text-align: left; color: var(--text);
+}
+.pf-exp-head:hover { background: var(--surface-2); }
+.pf-exp.open .pf-exp-head { background: var(--surface-2); }
+.pf-exp-mark { display: flex; align-items: center; }
+.pf-exp-main { min-width: 0; }
+.pf-exp-title { display: block; font-size: 13px; font-weight: 700; line-height: 1.4; }
+.pf-exp-note {
+  display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+  /* One line while collapsed — the row is a scan target, not the argument. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-exp-caret { color: var(--text-faint); flex-shrink: 0; }
+.pf-exp-body { padding: 2px 16px 16px; }
+
 /* ---------- data flow traces ---------- */
 .pf-trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .pf-trace-step {
@@ -668,6 +708,10 @@
 .pf-sev {
   font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
   border-radius: 20px; padding: 3px 9px; white-space: nowrap;
+  /* A FIXED width, not a minimum. At min-width:62px "medium" needed 66.9px and
+     overflowed it, pushing its three titles 5px right of the other six — the nine
+     rows had two title columns instead of one. 72px clears the widest word. */
+  display: inline-block; width: 72px; text-align: center;
 }
 .pf-sev.sev-high { background: var(--danger-weak); color: var(--ink-danger); }
 .pf-sev.sev-medium { background: var(--warn-weak); color: var(--ink-warn); }
@@ -722,6 +766,9 @@
 }
 
 @media (max-width: 900px) {
+  /* Two lists abreast becomes two ~160px columns on a phone, which is narrower than
+     the sentences in them. */
+  .pf-two { grid-template-columns: minmax(0, 1fr); }
   .pf-truth, .pf-role-grid { grid-template-columns: minmax(0, 1fr); }
   .pf-trace-step { grid-template-columns: 24px minmax(0, 1fr); }
   /* The step's own name moves above its content rather than beside it: at this
@@ -743,6 +790,11 @@
   .pf-probe-head { flex-direction: column; align-items: stretch; gap: 10px; }
   .pf-split-main { padding: 10px 10px; }
   .pf-detail { padding: 12px 12px; }
+  /* The severity chip and the caret both give up their column so the title keeps the
+     width. The chip stays in the flow above the title instead. */
+  .pf-exp-head { padding: 10px 12px; gap: 9px; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .pf-exp-head .pf-chip { display: none; }
+  .pf-exp-body { padding: 2px 12px 12px; }
 }
 
 @media (max-width: 520px) {

@@ -31,7 +31,8 @@ const H_GAP = 78 // between columns, reading across
 const V_GAP = 44 // between rows, reading down — a stacked flow needs less air
 const NODE_GAP = 14 // between nodes inside one stage
 const PAD = 16
-const HEAD = 26 // stage title band
+const HEAD = 26 // stage title band, reading across
+const GUTTER = 104 // stage title column, reading down
 
 const ZOOMS = [0.5, 0.65, 0.8, 0.9, 1, 1.15, 1.35, 1.6]
 // Never shrink past this to make something fit. Fitting is only worth doing while the
@@ -68,12 +69,16 @@ function layout(stages, vertical) {
   const nodeSpan = vertical ? NODE_W : NODE_H // extent along cross
   const gap = vertical ? V_GAP : H_GAP
 
-  // Reading across, the stage titles form one band along the top, so they cost the
-  // cross axis. Reading down, each title sits above its own row, so they cost the
-  // main axis once per stage.
-  const stageStep = nodeDepth + gap + (vertical ? HEAD : 0)
-  const mainOrigin = PAD + (vertical ? HEAD : 0)
-  const crossOrigin = PAD + (vertical ? 0 : HEAD)
+  // WHERE THE STAGE TITLES GO, and why it matters.
+  // Reading across they form a band along the top, above the columns — fine.
+  // Reading down, the first version put each title in the gap ABOVE its row, which
+  // is exactly where the connector between two boxes runs: every arrow was drawn
+  // straight through a line of text. They now sit in a left-hand gutter, aligned
+  // with their own row, so the boxes form one clean column with nothing crossing it
+  // and the whole thing reads as a timeline.
+  const stageStep = nodeDepth + gap
+  const mainOrigin = PAD
+  const crossOrigin = PAD + (vertical ? GUTTER : HEAD)
 
   const spanOf = (n) => n * nodeSpan + Math.max(0, n - 1) * NODE_GAP
   const widest = Math.max(1, ...stages.map((s) => s.nodes.length))
@@ -102,10 +107,12 @@ function layout(stages, vertical) {
     stageBoxes.push({
       id: stage.id,
       title: stage.title,
-      x: vertical ? crossOrigin : main,
-      y: vertical ? main - HEAD : PAD,
-      w: vertical ? span : NODE_W,
-      h: HEAD,
+      // Vertical: the gutter beside the row, the full height of the box so the title
+      // can centre against it. Horizontal: the band above the column.
+      x: vertical ? PAD : main,
+      y: vertical ? main : PAD,
+      w: vertical ? GUTTER - 12 : NODE_W,
+      h: vertical ? nodeDepth : HEAD,
       vertical,
     })
   })
@@ -120,42 +127,64 @@ function layout(stages, vertical) {
   }
 }
 
-// Edges are derived, not authored twice: a node either names its successors or is
-// taken to feed every node in the following stage. Authoring the edge list by hand
-// as well as the stage list would have let the two disagree.
-function edgesFor(stages, byId) {
+// ONE arrow per stage transition, drawn between the stages themselves rather than
+// between their boxes.
+//
+// WHY, because this was the second arrow bug and it is the more interesting one.
+// Connecting every box to every box in the next stage looked reasonable and produced
+// a mess: a two-box stage followed by another two-box stage gives four arrows in an
+// X, and the Warehouse process reached eighteen arrows for eleven boxes.
+//
+// The deeper problem was semantic. The boxes inside one stage are not steps that
+// follow one another — they are the aspects of that stage ("Receiving" holds the
+// warehouse receipt AND the safekeeping receipt). Drawing arrows between them claimed
+// an order that does not exist. The STAGES are sequential; their contents are not. So
+// the arrow now joins stage to stage, one per transition, and says only what is true.
+function stageEdges(stages, nodesByStage) {
   const out = []
-  stages.forEach((stage, si) => {
-    const nextStage = stages[si + 1]
-    stage.nodes.forEach((node) => {
-      const targets = node.next && node.next.length
-        ? node.next
-        : nextStage
-          ? nextStage.nodes.map((n) => n.id)
-          : []
-      targets.forEach((t) => {
-        if (byId[node.id] && byId[t]) out.push({ from: node.id, to: t })
-      })
-    })
-  })
+  for (let i = 0; i < stages.length - 1; i++) {
+    const from = nodesByStage[stages[i].id]
+    const to = nodesByStage[stages[i + 1].id]
+    if (!from?.length || !to?.length) continue
+    out.push({ from, to })
+  }
   return out
 }
 
-function edgePath(a, b, vertical) {
+// The face of a stage that an arrow leaves from or arrives at: the centre of the
+// group's extent on the cross axis, at the group's leading or trailing edge.
+function stageFace(group, vertical, trailing) {
+  const xs = group.map((n) => n.x)
+  const ys = group.map((n) => n.y)
   if (vertical) {
-    const x1 = a.x + a.w / 2
-    const y1 = a.y + a.h
-    const x2 = b.x + b.w / 2
-    const y2 = b.y
-    const c = Math.max(24, (y2 - y1) / 2)
-    return `M ${x1} ${y1} C ${x1} ${y1 + c}, ${x2} ${y2 - c}, ${x2} ${y2}`
+    const left = Math.min(...xs)
+    const right = Math.max(...xs) + NODE_W
+    return { x: (left + right) / 2, y: trailing ? Math.max(...ys) + NODE_H : Math.min(...ys) }
   }
-  const x1 = a.x + a.w
-  const y1 = a.y + a.h / 2
-  const x2 = b.x
-  const y2 = b.y + b.h / 2
-  const c = Math.max(24, (x2 - x1) / 2)
-  return `M ${x1} ${y1} C ${x1 + c} ${y1}, ${x2 - c} ${y2}, ${x2} ${y2}`
+  const top = Math.min(...ys)
+  const bottom = Math.max(...ys) + NODE_H
+  return { x: trailing ? Math.max(...xs) + NODE_W : Math.min(...xs), y: (top + bottom) / 2 }
+}
+
+// A STRAIGHT line whenever the two boxes are aligned, which after the journey was
+// made sequential is almost always. The first version curved every connector, and a
+// bezier between two boxes that sit directly under one another bulges for no reason
+// and reads as though it is going somewhere. Only a genuine sideways step — a stage
+// with two boxes feeding one — gets a curve.
+// Straight whenever the two faces line up, which after the change above is always
+// for a single-column flow and almost always otherwise. The first version curved
+// every connector, and a bezier between two boxes sitting directly under one another
+// bulges for no reason and reads as though it is going somewhere.
+function edgePath(a, b, vertical) {
+  const ALIGNED = 2 // px of drift still treated as a straight run
+  if (vertical) {
+    if (Math.abs(b.x - a.x) <= ALIGNED) return `M ${a.x} ${a.y} L ${a.x} ${b.y}`
+    const c = Math.max(18, (b.y - a.y) * 0.45)
+    return `M ${a.x} ${a.y} C ${a.x} ${a.y + c}, ${b.x} ${b.y - c}, ${b.x} ${b.y}`
+  }
+  if (Math.abs(b.y - a.y) <= ALIGNED) return `M ${a.x} ${a.y} L ${b.x} ${a.y}`
+  const c = Math.max(18, (b.x - a.x) * 0.45)
+  return `M ${a.x} ${a.y} C ${a.x + c} ${a.y}, ${b.x - c} ${b.y}, ${b.x} ${b.y}`
 }
 
 export default function FlowDiagram({
@@ -179,15 +208,15 @@ export default function FlowDiagram({
   const [zoomIdx, setZoomIdx] = useState(4) // index of 1.0
   const [autoFit, setAutoFit] = useState(true)
 
-  const byId = useMemo(() => {
-    const map = {}
-    stages.forEach((s) => s.nodes.forEach((n) => { map[n.id] = true }))
-    return map
-  }, [stages])
-
   const model = useMemo(() => layout(stages, vertical), [stages, vertical])
-  const nodeById = useMemo(() => Object.fromEntries(model.nodes.map((n) => [n.id, n])), [model])
-  const edges = useMemo(() => edgesFor(stages, byId), [stages, byId])
+  // Laid-out nodes grouped by their stage, which is what the stage-to-stage arrows
+  // measure their endpoints from.
+  const nodesByStage = useMemo(() => {
+    const map = {}
+    model.nodes.forEach((n) => { (map[n.stageId] ||= []).push(n) })
+    return map
+  }, [model])
+  const edges = useMemo(() => stageEdges(stages, nodesByStage), [stages, nodesByStage])
 
   // Fit-to-width only ever scales DOWN. Stretching a small diagram to fill a wide
   // screen makes the boxes bigger than the cards around them and looks broken.
@@ -293,17 +322,18 @@ export default function FlowDiagram({
                 </marker>
               </defs>
               {edges.map((e, i) => {
-                const a = nodeById[e.from]
-                const b = nodeById[e.to]
-                if (!a || !b) return null
-                // An edge is only as certain as its weaker end: an arrow into an
-                // unbuilt step must not be drawn as a solid, working connection.
-                const weak = a.status !== 'live' || b.status !== 'live'
+                const a = stageFace(e.from, vertical, true)
+                const b = stageFace(e.to, vertical, false)
+                // An arrow is only as certain as the ground at either end: one that
+                // leads into an unbuilt step must not be drawn as a solid, working
+                // connection.
+                const weak = [...e.from, ...e.to].some((n) => n.status !== 'live')
+                const allDim = [...e.from, ...e.to].every(dimmed)
                 return (
                   <path
                     key={i}
                     d={edgePath(a, b, vertical)}
-                    className={`pf-edge ${weak ? 'weak' : ''} ${dimmed(a) && dimmed(b) ? 'dim' : ''}`}
+                    className={`pf-edge ${weak ? 'weak' : ''} ${allDim ? 'dim' : ''}`}
                     markerEnd="url(#pf-arrow)"
                   />
                 )

@@ -3,13 +3,13 @@ import { useSearchParams } from 'react-router-dom'
 import {
   ARCHITECTURE, CODE, DATA_FLOWS, DB, DEP_FINDINGS, DEP_NOTES, FUTURE_ROLES, JOURNEY,
   PROCESSES, REQUEST_FLOW, ROLE_MATRIX, SEARCH_INDEX, SECURITY_SECTIONS, STATUS,
-  SUMMARY, STEP_LABELS, TABLE_NOTES, VULNERABILITIES, lockedFor, uiPerms,
+  SUMMARY, STEP_LABELS, TABLE_NOTES, VULNERABILITIES, JOURNEY_RECOMMENDATIONS, lockedFor, uiPerms,
 } from '../data/processFlow'
 import { Card, Badge, KpiCard } from '../components/ui'
 import FlowDiagram from '../components/processflow/FlowDiagram'
 import ErdDiagram from '../components/processflow/ErdDiagram'
 import LiveProbe from '../components/processflow/LiveProbe'
-import { DetailPanel, Evidence, SectionBar, StatusChip, StatusFilter, StatusLegend } from '../components/processflow/pfUi'
+import { DetailPanel, Evidence, ExpandRow, SectionBar, StatusChip, StatusFilter, StatusLegend } from '../components/processflow/pfUi'
 import Icon from '../lib/icons'
 import '../styles/processflow.css'
 
@@ -104,27 +104,38 @@ function JourneyView({ filter, query }) {
         </div>
       </Card>
 
-      <Card title="Where the journey breaks" icon="alert" className="mt">
-        <p className="pf-note">
-          {/* Counted from the journey itself rather than written as a number. An
-              earlier draft said "four" and there were six — exactly the kind of small
-              lie a documentation page must not contain. */}
-          {breaks.length} points in the chain above do not reach the database. They are the bulk of the
-          remaining work, and most of them are the same shape: a finished screen with no save behind it.
-        </p>
-        <div className="pf-break-grid">
-          {breaks.map((n) => (
-              <div key={n.id} className={`pf-break st-${n.status}`}>
-                <div className="pf-break-head">
-                  <StatusDot status={n.status} />
-                  <span className="pf-break-title">{n.label}</span>
+      {/* Two compact lists side by side rather than two more full cards: what is
+          broken, and what I am proposing. Counted, not asserted — an earlier draft
+          said "four points" and there were six. */}
+      <div className="pf-two mt">
+        <Card title={`Where it breaks · ${breaks.length}`} icon="alert">
+          <div className="pf-mini">
+            {breaks.map((n) => (
+              <div key={n.id} className={`pf-mini-row st-${n.status}`}>
+                <StatusDot status={n.status} />
+                <div>
+                  <span className="pf-mini-title">{n.label}</span>
+                  {n.missing && <span className="pf-mini-note">{n.missing}</span>}
                 </div>
-                {n.missing && <p className="pf-break-missing">{n.missing}</p>}
-                <Evidence items={n.evidence} label="Where" />
               </div>
             ))}
-        </div>
-      </Card>
+          </div>
+        </Card>
+
+        <Card title={`Proposed additions · ${JOURNEY_RECOMMENDATIONS.length}`} icon="plus" right={<StatusChip status="recommended" size="sm" />}>
+          <div className="pf-mini">
+            {JOURNEY_RECOMMENDATIONS.map((r) => (
+              <div key={r.label} className="pf-mini-row st-recommended">
+                <StatusDot status="recommended" />
+                <div>
+                  <span className="pf-mini-title">{r.label} <em>· at {r.at}</em></span>
+                  <span className="pf-mini-note">{r.detail}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </>
   )
 }
@@ -304,8 +315,7 @@ function ArchitectureView({ filter, query }) {
         right={<Badge tone="info">{CODE.fileCount} files</Badge>}
       >
         <p className="pf-note">
-          Counted from the actual import statements, not asserted. A file near the top of this list is one
-          a change is felt everywhere from — worth knowing before editing it.
+          Counted from the actual import statements. A change near the top of this list is felt everywhere.
         </p>
         <table className="pf-table">
           <thead>
@@ -479,12 +489,9 @@ function DatabaseView({ query }) {
         <div className="pf-split wide-side">
           <div className="pf-split-main">
             <p className="pf-note">
-              Tables are grouped by how they connect: the left column holds no foreign keys in either
-              direction, the middle column holds one or more, and the right column is what everything else
-              points at. Read the grouping badge on each box for what KIND of table it is —{' '}
-              <code>audit_log</code> is transactional and still sits on the left, because it records a user&rsquo;s
-              email as plain text instead of referencing their account. That is the finding, not a drawing
-              accident, and it is why nothing points out of that box.
+              Grouped by how they connect, not by what they hold — read the badge on each box for that.
+              <code>audit_log</code> is transactional and still sits on the left, because it records an email
+              as text instead of referencing an account. That absence is the finding.
             </p>
             <ErdDiagram onSelect={(t) => setSel((s) => (s?.name === t.name ? null : t))} selectedName={sel?.name} query={query} height={620} />
           </div>
@@ -543,10 +550,9 @@ function DatabaseView({ query }) {
           </tbody>
         </table>
         <p className="pf-foot">
-          Column lists, keys and policies here are parsed from <code>supabase/schema.sql</code> by{' '}
-          <code>npm run model</code>, so they cannot fall out of step with the schema. They describe the schema
-          FILE — if a table were altered by hand in the Supabase editor without updating that file, only the
-          live check above would notice.
+          Parsed from <code>supabase/schema.sql</code>, so this cannot fall out of step with the schema. It
+          describes the schema FILE — a table altered by hand in the Supabase editor would show up only in
+          the live check above.
         </p>
       </Card>
     </>
@@ -556,35 +562,57 @@ function DatabaseView({ query }) {
 /* ------------------------------------------------------------------ 5. Data flow */
 
 function DataFlowView() {
+  // First trace open, the rest closed: one worked example is enough to show the
+  // shape, and six open at once was 2,900 pixels of near-identical tables.
+  const [open, setOpen] = useState(() => new Set([DATA_FLOWS[0].id]))
+  const toggle = (id) =>
+    setOpen((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+
   return (
     <>
       <SectionBar
-        title="Transaction traces"
-        note="The same eight questions asked of every major transaction: what the user did, which screen, which call, which service, which table, which trigger, what came back, and what changed on screen. Where a step does not exist, it says so — that is the useful part."
+        title={`Transaction traces · ${DATA_FLOWS.length}`}
+        note="The same eight questions of every major transaction. Where a step does not exist, it says so."
+        right={
+          <div className="pf-bulk">
+            <button className="btn btn-sm" onClick={() => setOpen(new Set(DATA_FLOWS.map((f) => f.id)))}>Expand all</button>
+            <button className="btn btn-sm" onClick={() => setOpen(new Set())}>Collapse all</button>
+          </div>
+        }
       />
-      {DATA_FLOWS.map((f) => (
-        <Card
-          key={f.id}
-          className="mt"
-          title={f.title}
-          icon={f.status === 'live' ? 'check' : 'alert'}
-          right={<StatusChip status={f.status} size="sm" />}
-        >
-          {f.note && <p className="pf-note">{f.note}</p>}
-          <ol className="pf-trace">
-            {f.steps.map((s, i) => (
-              <li key={i} className={`pf-trace-step st-${s.status}`}>
-                <span className="pf-trace-n">{i + 1}</span>
-                <span className="pf-trace-label">{STEP_LABELS[i]}</span>
-                <span className="pf-trace-body">
-                  <StatusDot status={s.status} />
-                  {s.label}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </Card>
-      ))}
+      <Card className="mt" pad={false}>
+        <div className="pf-exp-list">
+          {DATA_FLOWS.map((f) => (
+            <ExpandRow
+              key={f.id}
+              open={open.has(f.id)}
+              onToggle={() => toggle(f.id)}
+              mark={<StatusDot status={f.status} />}
+              title={f.title}
+              note={f.note}
+              right={<StatusChip status={f.status} size="sm" />}
+            >
+              <ol className="pf-trace">
+                {f.steps.map((s, i) => (
+                  <li key={i} className={`pf-trace-step st-${s.status}`}>
+                    <span className="pf-trace-n">{i + 1}</span>
+                    <span className="pf-trace-label">{STEP_LABELS[i]}</span>
+                    <span className="pf-trace-body">
+                      <StatusDot status={s.status} />
+                      {s.label}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </ExpandRow>
+          ))}
+        </div>
+      </Card>
     </>
   )
 }
@@ -601,36 +629,56 @@ const ACTS = [
 ]
 
 function AccessView() {
+  const [openRole, setOpenRole] = useState(() => new Set())
+  const toggleRole = (key) =>
+    setOpenRole((s) => {
+      const n = new Set(s)
+      if (n.has(key)) n.delete(key)
+      else n.add(key)
+      return n
+    })
+
   return (
     <>
-      <Card title="Two different answers to the same question" icon="lock">
+      <Card title="The interface and the database disagree" icon="lock">
         <p className="pf-note">
-          Each role below is described twice, because the interface and the database do not agree. The left
-          column is what the application offers a role. The right column is what the database would actually
-          allow if the same person asked it directly, with their own sign-in, bypassing the screens entirely.
-          Where the two disagree, the database wins — and that gap is the most important thing on this page.
+          Each role below is described twice. Where the two columns disagree, the database wins.
         </p>
         <div className="pf-truth">
           <div className="pf-truth-side">
             <div className="pf-truth-head"><Icon name="dashboard" size={14} /> The interface enforces</div>
-            <p>Which menu items appear, which are padlocked, which buttons a role is shown. Real, and real only as long as somebody uses the screens.</p>
+            <p>Which menu items appear and which are padlocked — real only as long as somebody uses the screens.</p>
             <code className="pf-path">src/data/roles.js</code>
           </div>
           <div className="pf-truth-side strong">
             <div className="pf-truth-head"><Icon name="lock" size={14} /> The database enforces</div>
-            <p>Two kinds of user: administrator, and everyone else who is signed in. All four operational roles hold identical rights.</p>
+            <p>Two kinds of user: administrator, and everyone else signed in. All four operational roles are identical.</p>
             <code className="pf-path">supabase/schema.sql</code>
           </div>
         </div>
       </Card>
 
+      <SectionBar
+        title={`Roles today · ${ROLE_MATRIX.length}`}
+        note="Open a role for what the interface offers it and what the database would actually allow."
+        icon="users"
+        right={
+          <div className="pf-bulk">
+            <button className="btn btn-sm" onClick={() => setOpenRole(new Set(ROLE_MATRIX.map((r) => r.key)))}>Expand all</button>
+            <button className="btn btn-sm" onClick={() => setOpenRole(new Set())}>Collapse all</button>
+          </div>
+        }
+      />
+      <Card className="mt" pad={false}>
+      <div className="pf-exp-list">
       {ROLE_MATRIX.map((r) => (
-        <Card
+        <ExpandRow
           key={r.key}
-          className="mt"
+          open={openRole.has(r.key)}
+          onToggle={() => toggleRole(r.key)}
+          mark={<Icon name="users" size={15} className="pf-dim" />}
           title={r.label}
-          icon="users"
-          right={<Badge tone="info">{r.people}</Badge>}
+          note={r.people + (r.gaps.length ? ` · ${r.gaps.length} mismatch${r.gaps.length > 1 ? 'es' : ''}` : '')}
         >
           <div className="pf-role-grid">
             <div className="pf-role-col">
@@ -678,8 +726,10 @@ function AccessView() {
               ))}
             </div>
           )}
-        </Card>
+        </ExpandRow>
       ))}
+      </div>
+      </Card>
 
       <SectionBar
         title="Roles the system does not have yet"
@@ -712,6 +762,14 @@ const SEV_TONE = { high: 'danger', medium: 'warn', low: 'info' }
 
 function SecurityView() {
   const bySev = (s) => VULNERABILITIES.filter((v) => v.severity === s)
+  const [openVuln, setOpenVuln] = useState(() => new Set())
+  const toggleVuln = (id) =>
+    setOpenVuln((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
   return (
     <>
       <div className="kpi-grid pf-kpis">
@@ -741,9 +799,15 @@ function SecurityView() {
       ))}
 
       <SectionBar
-        title="Vulnerability assessment"
-        note="Ranked by severity. Every finding names where it is in the code, and what fixing it involves. Two of them are about something that has not been built yet — those are the ones to design out now rather than discover later."
+        title={`Vulnerability assessment · ${VULNERABILITIES.length}`}
+        note="Ranked by severity. Open one for where it is in the code and what fixing it involves."
         icon="alert"
+        right={
+          <div className="pf-bulk">
+            <button className="btn btn-sm" onClick={() => setOpenVuln(new Set(VULNERABILITIES.map((v) => v.id)))}>Expand all</button>
+            <button className="btn btn-sm" onClick={() => setOpenVuln(new Set())}>Collapse all</button>
+          </div>
+        }
       />
       {/* This has to be said on the page, not just in a commit message. The repository
           is public and this module ships inside the published bundle, so these findings
@@ -752,45 +816,43 @@ function SecurityView() {
       <div className="pf-public-warn mt">
         <Icon name="alert" size={15} />
         <div>
-          <b>This section is publicly readable.</b> The repository is public and this page ships inside the
-          published site, so anything written here can be read by anyone — signed in or not. The underlying
-          facts were already public, because the schema file is in the repository, but this page gathers them
-          into one convenient list. Two consequences worth acting on: close the high-severity findings before
-          anything else, and decide whether this view should be restricted to administrators once the system
-          holds live data. Restricting it is a one-line change in{' '}
-          <code>src/data/roles.js</code>.
+          <b>This section is publicly readable.</b> The repository is public and this page ships in the
+          published site. The facts were already public — the schema file is committed — but this gathers
+          them into one list. Close the high-severity findings first, then decide whether to restrict this
+          view to administrators: one line in <code>src/data/roles.js</code>.
         </div>
       </div>
-      {['high', 'medium', 'low'].flatMap((sev) =>
-        bySev(sev).map((v) => (
-          <Card
-            key={v.id}
-            className="mt pf-vuln"
-            title={v.title}
-            icon="alert"
-            iconColor={`var(--${SEV_TONE[sev] === 'danger' ? 'danger' : SEV_TONE[sev] === 'warn' ? 'warn' : 'info'})`}
-            right={
-              <div className="pf-vuln-right">
-                <span className={`pf-sev sev-${sev}`}>{sev} severity</span>
-                <StatusChip status={v.status} size="sm" />
-              </div>
-            }
-          >
-            <p className="pf-vuln-detail">{v.detail}</p>
-            {v.verify && (
-              <div className="pf-vuln-block verify">
-                <div className="pf-vuln-block-head"><Icon name="search" size={13} /> Check this first</div>
-                <p>{v.verify}</p>
-              </div>
-            )}
-            <div className="pf-vuln-block fix">
-              <div className="pf-vuln-block-head"><Icon name="check" size={13} /> What fixing it involves</div>
-              <p>{v.fix}</p>
-            </div>
-            <Evidence items={v.evidence} />
-          </Card>
-        ))
-      )}
+      {/* One card, nine rows. Scan the list, open what matters. */}
+      <Card className="mt" pad={false}>
+        <div className="pf-exp-list">
+          {['high', 'medium', 'low'].flatMap((sev) =>
+            bySev(sev).map((v) => (
+              <ExpandRow
+                key={v.id}
+                open={openVuln.has(v.id)}
+                onToggle={() => toggleVuln(v.id)}
+                mark={<span className={`pf-sev sev-${sev}`}>{sev}</span>}
+                title={v.title}
+                note={openVuln.has(v.id) ? null : v.detail}
+                right={<StatusChip status={v.status} size="sm" />}
+              >
+                <p className="pf-vuln-detail">{v.detail}</p>
+                {v.verify && (
+                  <div className="pf-vuln-block verify">
+                    <div className="pf-vuln-block-head"><Icon name="search" size={13} /> Check this first</div>
+                    <p>{v.verify}</p>
+                  </div>
+                )}
+                <div className="pf-vuln-block fix">
+                  <div className="pf-vuln-block-head"><Icon name="check" size={13} /> The fix</div>
+                  <p>{v.fix}</p>
+                </div>
+                <Evidence items={v.evidence} />
+              </ExpandRow>
+            ))
+          )}
+        </div>
+      </Card>
     </>
   )
 }
@@ -820,9 +882,7 @@ function DependenciesView() {
     <>
       <Card title="Everything this application depends on" icon="box" right={<Badge tone="info">{CODE.dependencies.length} packages</Badge>}>
         <p className="pf-note">
-          Five packages to run and two to build it. The used/unused count in the fourth column is counted from
-          the actual import statements — including the build config, which is why the two build packages show as
-          used despite no application file importing them.
+          Five to run, two to build. The file count is taken from the real import statements, build config included.
         </p>
         <div className="pf-sub">Runtime — shipped to the browser</div>
         <table className="pf-table">
@@ -921,23 +981,21 @@ export default function ProcessFlow() {
 
   return (
     <div className="pf">
-      {/* ---- module header: what this is, and how much of the system is real ---- */}
+      {/* ---- module header ----
+           Deliberately short. The first version opened with a four-line paragraph
+           explaining the four statuses, which the legend directly below already does
+           — the reader was reading the same thing twice before seeing any content. */}
       <div className="pf-header">
-        <div className="pf-header-main">
-          <p className="pf-lede">
-            A map of how the Procurement &times; Warehouse system works today — every screen, every process,
-            every table and every security rule, with an honest label on each saying whether it is
-            <b> finished</b>, <b> half-built</b>, <b> only planned</b>, or <b> something I am recommending</b>.
-            Nothing on this page describes a workflow without saying whether that workflow actually runs.
-          </p>
-          <div className="pf-header-stats">
-            <span><b>{num(SUMMARY.fileCount)}</b> source files</span>
-            <span><b>{num(SUMMARY.lineCount)}</b> lines</span>
-            <span><b>{SUMMARY.routeCount}</b> routes</span>
-            <span><b>{SUMMARY.tableCount}</b> tables</span>
-            <span><b>{SUMMARY.policyCount}</b> security policies</span>
-            <span className="warn"><b>{SUMMARY.writePathCount}</b> of 7 transactional tables ever written to</span>
-          </div>
+        <p className="pf-lede">
+          How the system works today, with an honest label on every item. Nothing here describes a
+          workflow without saying whether it runs.
+        </p>
+        <div className="pf-header-stats">
+          <span><b>{SUMMARY.tableCount}</b> tables</span>
+          <span><b>{SUMMARY.routeCount}</b> routes</span>
+          <span><b>{SUMMARY.policyCount}</b> policies</span>
+          <span className="warn"><b>{SUMMARY.writePathCount} of 7</b> transactional tables ever written to</span>
+          <span className="bad"><b>{SUMMARY.highSeverity}</b> high-severity findings</span>
         </div>
       </div>
 
@@ -1017,12 +1075,9 @@ export default function ProcessFlow() {
       <div className="pf-provenance">
         <Icon name="doc" size={14} />
         <div>
-          <b>Where this page gets its facts.</b> The table catalogue, the relationship diagram, the route
-          list, the file counts and the dependency audit are generated straight from{' '}
-          <code>supabase/schema.sql</code> and from the source files themselves by <code>npm run model</code> —
-          they cannot drift from the code. The process descriptions and the judgements about how finished
-          something is are written by hand and were last reviewed on <b>{REVIEWED}</b>. The live database check
-          on the Database view is the only thing here that talks to the running server.
+          Tables, relationships, routes, file counts and the dependency audit are generated from{' '}
+          <code>supabase/schema.sql</code> and the source by <code>npm run model</code>, so they cannot drift.
+          Process descriptions are written by hand, last reviewed <b>{REVIEWED}</b>.
         </div>
       </div>
     </div>

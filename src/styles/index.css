@@ -391,7 +391,25 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; }
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 9px 12px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
 }
-.kpi::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--kpi-color, var(--brand-red)); }
+/* The colour accent down the left edge.
+   It is drawn as a full-size overlay whose OWN corners are rounded to the card's
+   padding box, with a gradient painting only the leftmost 4px. It used to be a
+   4px-wide square-cornered bar that got its shape from the parent's
+   `overflow: hidden` — which broke the moment anything set `overflow: visible`
+   (the tooltip does, on hover): the bar's square corners then jutted out across
+   the rounded border, and on an active tile, where the border is the same colour,
+   the two piled up as a thick misshapen line. Shape now belongs to the accent
+   itself, so it is correct in every overflow state.
+   A 4px-wide element cannot be given this shape directly — CSS scales a corner
+   radius down to fit the box, so an 11px radius on a 4px box collapses to 4px and
+   still cuts the corner in the wrong place. Hence the full-size overlay.
+   pointer-events: none because it now lies over the card's own content. */
+.kpi::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  border-radius: calc(var(--radius) - 1px);
+  background: linear-gradient(to right,
+    var(--kpi-color, var(--brand-red)) 0, var(--kpi-color, var(--brand-red)) 4px, transparent 4px);
+}
 .kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--kpi-color, var(--brand-red)) 12%, transparent); flex-shrink: 0; }
 .kpi-icon svg { width: 15px; height: 15px; }
@@ -1983,7 +2001,15 @@ body.col-resizing { user-select: none; cursor: col-resize; }
    was overlapping the expanded state — the two feedbacks stacked on one tile. Suppress
    the tip while active, and don't let the active tile lift on hover on top of it. */
 .kpi.active .kpi-tip { display: none; }
-.kpi.active.clickable:hover { transform: none; }
+/* Hovering an active tile must not undo the active outline. `.kpi.clickable:hover`
+   sets box-shadow and is MORE specific than `.kpi.active` (two classes + a
+   pseudo-class against two classes), so it was dropping the inset colour ring and
+   the tile's outline visibly thinned the moment the pointer touched it. Restate the
+   ring here, where the selector out-specifies both. */
+.kpi.active.clickable:hover {
+  transform: none;
+  box-shadow: inset 0 0 0 1px var(--kpi-color), var(--shadow);
+}
 
 /* The expanded list sits below the whole tile row, full card width — there is no
    chart beside it to share the row with any more. */

@@ -68,7 +68,7 @@ export default function Login() {
             </div>
           )}
         </div>
-        <div style={{ opacity: 0.85, fontSize: 12 }}>Building a First-World Philippines · © {new Date().getFullYear()} Megawide Construction Corporation</div>
+        <div style={{ opacity: 0.85, fontSize: 12 }}>Engineering a First-World Philippines · © {new Date().getFullYear()} Megawide Construction Corporation</div>
       </div>
 
       <div className="login-form-side">

@@ -2335,3 +2335,53 @@ because it does not depend on that setting; the setting itself still needs check
 the Supabase dashboard, and it cannot be read from the code.
 
 No password, and no user's credentials, are recorded in this repository.
+
+### 2026-09-02 — Session: KPI tile accent bar, active-on-hover outline, login tagline
+
+**1. The composition tiles' left colour bar broke whenever the card stopped clipping,
+which is what "weird overlapping when clicked and hovered" was.** `.kpi::before` was a
+4px-wide, square-cornered bar at `left/top/bottom: 0`, and its *shape* came entirely from
+the parent's `overflow: hidden` rounding it off against the 12px corner. But
+`.kpi.has-tip:hover` sets `overflow: visible` so the tooltip can escape the card — so the
+instant you hovered, the clipping stopped and the bar's square corners jutted out across
+the rounded border at top-left and bottom-left. On an ACTIVE tile that is loud, because
+`.kpi.active` colours the border the same hue as the bar: the escaped square slab and the
+rounded coloured border then read as two mismatched colour lines piled on one edge.
+Confirmed by measurement before touching anything (hovered active tile reported
+`overflow: visible`, card `border-radius: 12px`, `::before` `border-radius: 0`) and then
+by rendering the two states side by side at 4x.
+
+The accent now owns its own shape and no longer depends on the parent: a full-size
+overlay, `inset: 0`, `border-radius: calc(var(--radius) - 1px)` — the padding box's
+radius, since an absolutely positioned child is laid out against the padding box — with a
+`linear-gradient` painting only the leftmost 4px. It renders identically whether the card
+clips or not.
+
+Worth recording why the obvious one-liner does not work: giving the 4px bar
+`border-radius: 11px 0 0 11px` fails, because CSS scales corner radii down to fit the box
+and an 11px radius on a 4px-wide box collapses to 4px, which cuts the corner in the wrong
+place — at x=0 the card's own curve starts 11px down while a 4px radius starts 4px down,
+so the bar still overhangs by 7px. Only a box the full width of the card can carry the
+card's curve. The overlay therefore sits over the tile's content and needs
+`pointer-events: none`, or it would swallow the click that opens the list.
+
+**2. Hovering an active tile visibly thinned its outline.** `.kpi.clickable:hover` sets
+`box-shadow` and out-specifies `.kpi.active` (two classes plus a pseudo-class against two
+classes), so the active state's `inset 0 0 0 1px var(--kpi-color)` ring was being dropped
+on hover and the 2px-reading outline snapped back to 1px under the pointer. The ring is
+now restated on `.kpi.active.clickable:hover`, which beats both. Measured after: the
+computed `box-shadow` is byte-identical active vs active-and-hovered.
+
+Both fixes verified at 4x magnification in light and dark, on the real September data,
+and the tile's click-to-expand, the tooltip on a non-active tile, and the active tile's
+tooltip suppression all still behave.
+
+**Measurement note, the same trap as previous sessions.** Mid-check `getComputedStyle`
+reported the hovered tile's tooltip as `visibility: hidden` while the rule
+`.kpi.has-tip:hover .kpi-tip` demonstrably matched it — the browser pane's stale
+style-recalculation again, on a descendant even though the hovered element's own
+`overflow` had already updated. A screenshot showed the tooltip rendering perfectly. Judge
+hover-dependent styling by what is painted, not by what `getComputedStyle` reports.
+
+**3. Login tagline** — "Building a First-World Philippines" is now **"Engineering a
+First-World Philippines"**, matching the corporate line. One occurrence, in `Login.jsx`.

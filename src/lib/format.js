@@ -13,10 +13,13 @@ export const compact = (n) =>
 
 export const pct = (n) => `${(n || 0).toFixed(1)}%`
 
-// Base date for the prototype. The SOH snapshot is 2026-07-21; "today" is the latest
-// date anywhere in the source workbook — the last outgoing release, three days after
-// that cut-off — so no movement on record ever lands on a future date.
-export const TODAY = new Date('2026-07-24T00:00:00')
+// Base date for the prototype: the snapshot date of the current source workbook, which
+// is also the base for every `off` in the ledger and for lastMovementOffset on a stock
+// line. It MUST match SNAPSHOT_DATE in private-data/inventory.js — the September
+// workbook's own "As of" date, which is also its latest recorded release, so no
+// movement on record ever lands on a future date.
+// Update this whenever a new snapshot is imported (npm run import).
+export const TODAY = new Date('2026-09-02T00:00:00')
 
 // 'YYYY-MM-DD' from a Date's LOCAL parts, for date-input values. Not
 // toISOString().slice(0,10) — that converts to UTC first, so a local-midnight date in any

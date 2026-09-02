@@ -62,7 +62,15 @@ export default function LocationPanel({ title, sub, role, pool, capacity, note, 
                    The density figure is what actually distinguishes "just full" from
                    "badly over-subscribed". */
                 `Every position is in use, at about ${(t.lines / capacity.positions).toFixed(1)} lines per position`}
-            {' · '}capacity is counted off the racking drawing; which line sits in which bay is modelled
+            {' · '}capacity is counted off the racking drawing.{' '}
+            {/* Since the 2026-09-02 snapshot most lines carry the bin the warehouse
+                itself recorded, so this says which part of the map is read and which
+                is still inferred rather than disclaiming the whole thing. */}
+            {capacity.recorded === capacity.lines
+              ? 'Every line here is at its recorded bin.'
+              : capacity.recorded > 0
+              ? `${num(capacity.recorded)} of ${num(capacity.lines)} lines are at their recorded bin; the rest are modelled.`
+              : 'No bin was recorded for these lines, so their bays are modelled.'}
           </div>
         </div>
       )}

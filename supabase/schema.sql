@@ -168,6 +168,13 @@ create table if not exists public.inventory (
   condition_class      text,
   brand                text,
   model                text,
+  -- Storage location as RECORDED by the warehouse, from the snapshot workbook's
+  -- "Item per location bin" sheet: 'AREA-Rn-LL-BBB' (area, rack, beam level, bay).
+  -- Empty where the warehouse has not placed the line. zone/rack/shelf/bin are the
+  -- same address split into its parts. bin_count is how many bays the line occupies;
+  -- `location` names the first of them.
+  location text,
+  bin_count int not null default 0,
   zone text, rack text, shelf text, bin text,
   updated_at           timestamptz default now()
 );

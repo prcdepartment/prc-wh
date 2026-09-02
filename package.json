@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "seed": "node scripts/generate-seeds.mjs",
-    "model": "node scripts/generate-db-model.mjs && node scripts/generate-code-model.mjs"
+    "model": "node scripts/generate-db-model.mjs && node scripts/generate-code-model.mjs",
+    "import": "node scripts/import-snapshot.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

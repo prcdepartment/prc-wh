@@ -353,10 +353,17 @@ export const LS600_LEVELS = [167, 717, 1267, 1817]
 // -------------------------------------------------------------------------
 // HOW A MATERIAL LINE GETS A LOCATION
 //
-// The stock sheet does not record where anything physically sits — the zone / rack /
-// shelf / bin columns it used to carry were synthesized for the prototype and bore no
-// relation to this building. Rather than keep showing those, every line is placed by
-// the rule the warehouse plan itself implies:
+// RECORDED FIRST, MODELLED ONLY WHERE THERE IS NO RECORD.
+//
+// Until the 2026-09-02 snapshot no source sheet said where anything physically sat, so
+// every line was placed by rule. That snapshot's "Item per location bin" sheet gives
+// 754 of the 827 warehouse lines an actual address — area, rack, beam level, bay — in
+// the same vocabulary this map was drawn from, so those lines are now READ, not
+// guessed, and `inventory.location` carries the address as the warehouse wrote it.
+//
+// A line with a recorded address goes exactly where the warehouse put it, even when
+// that disagrees with what the rule below would have chosen: the warehouse is right
+// about its own building. The rule survives for the lines with no record:
 //
 //   1. Item group first, where the plan puts that group OUTSIDE the shed —
 //      rebar to the Deformed Rebar bay, tiles to the Tiles Area.
@@ -365,24 +372,76 @@ export const LS600_LEVELS = [167, 717, 1267, 1817]
 //   3. Then trade — the four material areas inside the shed are trade areas, so a
 //      line's Trade decides which one it belongs to.
 //   4. Inside an area, lines are ordered by issue frequency and laid into the rack
-//      positions from ground level upward, so fast-moving stock sits at pick height.
+//      positions still free after the recorded lines have taken theirs, from ground
+//      level upward, so fast-moving stock sits at pick height.
 //
-// Steps 1-3 are a real reading of the plan. Step 4 is a MODEL: which specific bay a
-// line occupies is not recorded anywhere and is not a measurement. Every screen that
-// shows a bay says so.
+// Steps 1-3 are a real reading of the plan. Step 4 is a MODEL. `locationOf()` reports
+// which of the two a given line got, so a screen can say so per line instead of
+// disclaiming the whole map.
 // -------------------------------------------------------------------------
+
+// The sheet's area names, mapped onto this map's own ids. The sheet numbers racks
+// WITHIN an area (STRUC-R1 is the structural area's only run); this map numbers them
+// across the whole shed (that same run is R4). Hence the per-area rack tables.
+const RECORDED_AREAS = {
+  MEPF: { area: 'mepfs', racks: { R1: 'R1', R2: 'R2', R3: 'R3' } },
+  STRUC: { area: 'structural', racks: { R1: 'R4' } },
+  ARCHI: { area: 'architectural', racks: { R1: 'R5' } },
+  // The high-value room's eight shelving lines are HV1..HV8 here; the sheet reaches R3.
+  'HIGH VALUE': { area: 'highvalue', racks: { R1: 'HV1', R2: 'HV2', R3: 'HV3' }, kind: 'shelving' },
+  // Areas the sheet names without a rack address.
+  CAGE: { area: 'highvalue' },
+  'TILES AREA': { site: 'tiles' },
+  // The plan draws the open stock yard as context, not as a clickable area with
+  // capacity, so a line recorded only as "YARD" has nowhere to land and falls through
+  // to the rule below rather than being dropped off the map.
+  YARD: null,
+}
+
+/**
+ * Decode `inventory.location` into a place on this map.
+ * Returns null when the line has no record, or its record names somewhere this map
+ * does not draw — in both cases the caller falls back to the rule.
+ */
+export function recordedPlacement(it) {
+  const raw = it?.location
+  if (!raw) return null
+  const [areaKey, rack, level, bay] = String(raw).split('-')
+  const spec = RECORDED_AREAS[areaKey?.toUpperCase()]
+  if (!spec) return null
+  if (spec.site) return { site: spec.site }
+  if (!rack) return { area: spec.area }
+
+  const rackId = spec.racks?.[rack.toUpperCase()]
+  if (!rackId) return { area: spec.area }
+  const def = RACKS.find((r) => r.id === rackId)
+  if (!def) return { area: spec.area }
+
+  // A bay or level outside what the racking drawing provides is a data-entry error,
+  // not a discovery of extra racking. Keep the area, drop the impossible bay.
+  const lvl = Number(level)
+  const b = Number(bay)
+  if (!(lvl >= 1 && lvl <= def.levels && b >= 1 && b <= def.bays)) return { area: spec.area }
+  return { area: spec.area, rack: rackId, bay: b, lvl, kind: spec.kind || def.kind || 'pallet' }
+}
 
 const REBAR_GROUPS = new Set(['Rebar Works', 'Rebar Consumables'])
 const TILE_GROUPS = new Set(['Tiles', 'Tile Consumables'])
 const LONG_UOM = new Set(['M', 'ROLL'])
 
 export function siteAreaFor(it) {
+  // A recorded address wins: if the warehouse says a line is in the Tiles Area it is,
+  // and if it says the line is on a rack indoors then no item-group rule sends it out.
+  const rec = recordedPlacement(it)
+  if (rec) return rec.site ?? null
   if (REBAR_GROUPS.has(it.tradeL2)) return 'rebar'
   if (TILE_GROUPS.has(it.tradeL2)) return 'tiles'
   return null
 }
 
 export function warehouseAreaFor(it) {
+  const rec = recordedPlacement(it)
+  if (rec?.area) return rec.area
   if (it.isHighValue) return 'highvalue'
   const a = WH_AREAS.find((w) => w.trades.includes(it.tradeL1))
   return a ? a.id : 'safekeeping'
@@ -419,14 +478,22 @@ export function placement() {
   const byLine = new Map() // item id -> location
   const site = { rebar: [], tiles: [], mrf: [] }
   const areas = Object.fromEntries(WH_AREAS.map((a) => [a.id, []]))
+  // Lines the warehouse has addressed to a specific bay, so the modelling pass can
+  // route around them instead of stacking a guess on top of a record.
+  const fixed = new Map() // item id -> { area, rack, bay, lvl, kind }
 
   for (const it of items) {
     const s = siteAreaFor(it)
     if (s) {
       site[s].push(it)
-      byLine.set(it.id, { level: 'site', area: s, label: SITE_AREAS.find((a) => a.id === s).name })
+      byLine.set(it.id, {
+        level: 'site', area: s, label: SITE_AREAS.find((a) => a.id === s).name,
+        recorded: !!recordedPlacement(it)?.site,
+      })
     } else {
-      areas[warehouseAreaFor(it)].push(it)
+      const rec = recordedPlacement(it)
+      areas[rec?.area ?? warehouseAreaFor(it)].push(it)
+      if (rec?.rack) fixed.set(it.id, rec)
     }
   }
   // The MRF is where damaged stock is segregated for disposition. Those lines are
@@ -437,8 +504,17 @@ export function placement() {
   const slots = {} // "rack|bay|level" -> item[]
   const put = (key, it) => { (slots[key] ??= []).push(it) }
 
+  // Pass 1 — every line the warehouse has actually addressed goes to its own bay.
+  for (const it of items) {
+    const rec = fixed.get(it.id)
+    if (!rec) continue
+    byLine.set(it.id, { level: 'rack', recorded: true, ...rec })
+    put(`${rec.rack}|${rec.bay}|${rec.lvl}`, it)
+  }
+
+  // Pass 2 — everything else is modelled into the positions still free.
   for (const area of WH_AREAS) {
-    const pool = areas[area.id].slice().sort(byPickRate)
+    const pool = areas[area.id].slice().filter((it) => !fixed.has(it.id)).sort(byPickRate)
 
     let racked = pool
     if (area.id === 'safekeeping') {
@@ -450,11 +526,11 @@ export function placement() {
       cant.forEach((it, i) => {
         const bay = (i % CANTILEVER.bays) + 1
         const arm = (Math.floor(i / CANTILEVER.bays) % CANTILEVER.arms) + 1
-        byLine.set(it.id, { level: 'rack', area: area.id, rack: 'CANT', bay, lvl: arm, kind: 'cantilever' })
+        byLine.set(it.id, { level: 'rack', recorded: false, area: area.id, rack: 'CANT', bay, lvl: arm, kind: 'cantilever' })
         put(`CANT|${bay}|${arm}`, it)
       })
       floor.forEach((it) => {
-        byLine.set(it.id, { level: 'rack', area: area.id, rack: 'FLOOR', kind: 'floor' })
+        byLine.set(it.id, { level: 'rack', recorded: false, area: area.id, rack: 'FLOOR', kind: 'floor' })
         put('FLOOR||', it)
       })
       racked = rest
@@ -463,9 +539,21 @@ export function placement() {
     const rackList = RACKS.filter((r) => r.area === area.id)
     const pos = positionsFor(rackList)
     if (!pos.length) continue
+    // Prefer positions no recorded line already holds. If the modelled lines outnumber
+    // what is left, the remainder wraps over the whole run as before — an area can hold
+    // more lines than it has bays, and pretending otherwise would drop them off the map.
+    const free = pos.filter((p) => !slots[`${p.rack}|${p.bay}|${p.level}`])
+    const lay = free.length ? free : pos
     racked.forEach((it, i) => {
-      const p = pos[i % pos.length]
-      byLine.set(it.id, { level: 'rack', area: area.id, rack: p.rack, bay: p.bay, lvl: p.level, kind: p.kind })
+      const p = lay[i % lay.length]
+      byLine.set(it.id, {
+        level: 'rack', recorded: false,
+        // Some records name only an area — "CAGE", or a bay number the racking drawing
+        // does not have. The area is then still the warehouse's own word for it and
+        // only the bay is inferred, which is a different claim from knowing neither.
+        recordedArea: !!recordedPlacement(it)?.area,
+        area: area.id, rack: p.rack, bay: p.bay, lvl: p.level, kind: p.kind,
+      })
       put(`${p.rack}|${p.bay}|${p.level}`, it)
     })
   }
@@ -491,7 +579,7 @@ export const totals = (pool) => ({
 // Occupancy is "positions holding at least one line", not a volume measurement —
 // nothing in the system records how full a pallet is.
 export function areaCapacity(areaId) {
-  const { slots, areas } = placement()
+  const { slots, areas, byLine } = placement()
   const rackList = RACKS.filter((r) => r.area === areaId)
   let positions = rackList.reduce((a, r) => a + r.positions, 0)
   let used = Object.keys(slots).filter((k) => rackList.some((r) => k.startsWith(`${r.id}|`))).length
@@ -500,7 +588,11 @@ export function areaCapacity(areaId) {
     used += Object.keys(slots).filter((k) => k.startsWith('CANT|')).length
   }
   const unit = areaId === 'highvalue' ? 'shelf positions' : 'pallet positions'
-  return { positions, used, unit, lines: areas[areaId]?.length ?? 0 }
+  const lines = areas[areaId] ?? []
+  // How much of this area's map is read off the warehouse's own bin list rather than
+  // modelled, so a screen can be specific instead of disclaiming everything.
+  const recorded = lines.filter((it) => byLine.get(it.id)?.recorded).length
+  return { positions, used, unit, lines: lines.length, recorded }
 }
 
 // Whole-facility capacity split into Warehouse-owned (mepfs, structural,
@@ -563,11 +655,17 @@ export const siteItems = (areaId) => placement().site[areaId] || []
 export function locationOf(item) {
   const loc = placement().byLine.get(item.id)
   if (!loc) return null
-  if (loc.level === 'site') return { area: loc.label, detail: 'Outdoor stockyard', ...loc }
-  const area = AREA_BY_ID[loc.area]
-  if (loc.rack === 'FLOOR') return { area: area.name, detail: 'Floor Area — block stacked', ...loc }
-  if (loc.rack === 'CANT') return { area: area.name, detail: `Cantilever · Bay ${loc.bay} · Arm ${loc.lvl}`, ...loc }
+  // `loc` is spread FIRST and the display fields written over it. The other way round —
+  // which is how this read until 2026-09-02 — let loc.area (an internal id like
+  // 'mepfs') overwrite the area NAME that was just put there, so the material profile
+  // printed the id at the reader. areaId keeps the raw value for callers that want it.
+  const areaId = loc.area
+  if (loc.level === 'site') return { ...loc, areaId, area: loc.label, detail: 'Outdoor stockyard' }
+  const area = AREA_BY_ID[areaId]
+  const base = { ...loc, areaId, area: area.name }
+  if (loc.rack === 'FLOOR') return { ...base, detail: 'Floor Area — block stacked' }
+  if (loc.rack === 'CANT') return { ...base, detail: `Cantilever · Bay ${loc.bay} · Arm ${loc.lvl}` }
   if (loc.kind === 'shelving')
-    return { area: area.name, detail: `HV Line ${loc.rack.slice(2)} · Bay ${loc.bay} · Level ${loc.lvl}`, ...loc }
-  return { area: area.name, detail: `Rack ${loc.rack.slice(1)} · Bay ${loc.bay} · Level ${loc.lvl}`, ...loc }
+    return { ...base, detail: `HV Line ${loc.rack.slice(2)} · Bay ${loc.bay} · Level ${loc.lvl}` }
+  return { ...base, detail: `Rack ${loc.rack.slice(1)} · Bay ${loc.bay} · Level ${loc.lvl}` }
 }

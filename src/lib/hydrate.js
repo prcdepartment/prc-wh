@@ -59,6 +59,7 @@ const toInventory = (r) => ({
   issueFrequency: +r.issue_frequency, lastMovementOffset: +r.last_movement_offset,
   unitPrice: +r.unit_price, discountedPrice: +r.discounted_price, inventoryValue: +r.inventory_value,
   conditionClass: r.condition_class, brand: r.brand || '', model: r.model || '',
+  location: r.location || '', binCount: +r.bin_count || 0,
   zone: r.zone, rack: r.rack, shelf: r.shelf, bin: r.bin,
 })
 

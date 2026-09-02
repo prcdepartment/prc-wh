@@ -31,9 +31,11 @@ Montserrat / Barlow Condensed, light + dark mode.
 
 ## Data architecture (Phase 2, 2026-08-16)
 
-**Seeded reference tables** — `trades`, `projects`, `inventory` (779), `ledger` (184),
-`safekeeping_soh` (132), `safekeeping_incoming` (271), `safekeeping_outgoing` (160),
-`delivery_tracker` (27). Read by all signed-in users; **only admins write**.
+**Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
+`inventory` (827), `ledger` (214), `safekeeping_soh` (178), `safekeeping_incoming` (372),
+`safekeeping_outgoing` (262), `delivery_tracker` (27). Read by all signed-in users;
+**only admins write**. Counts are the 2026-09-02 snapshot — they change with every
+import, so treat them as "roughly this size", not as a contract.
 
 **Empty transactional tables** — `movements`, `reservations`, `purchase_requests`,
 `material_requests`, `approvals`, `safekeeping_requests`, `audit_log`. Any signed-in user
@@ -51,11 +53,21 @@ are RLS-gated and the pre-render pass returns nothing without a session.
 Consequence: **arrays in `src/data/` must be mutated, never reassigned.** A
 `export const x = [...]` that gets replaced instead of refilled silently breaks hydration.
 
-**Seed generation**: `npm run seed` → regenerates `supabase/seed/NN_seed.sql` from the
-modules in `/private-data/`. Run it whenever a source module there changes, then paste
-the parts into the Supabase SQL Editor IN ORDER. (The old hand-written
-`seed_inventory.sql` had drifted to a different snapshot and was missing five columns;
-generating removes that failure mode.)
+**Refreshing the data from a new warehouse workbook — the whole loop:**
+
+```bash
+npm run import -- "sample/<new workbook>.xlsx"   # xlsx  -> /private-data/*.js
+npm run seed                                      # /private-data/*.js -> supabase/seed/NN_seed.sql
+```
+
+Then update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`, and paste the seed
+parts into the Supabase SQL Editor **in order** (they are split only because the editor
+rejects a submission over ~1 MB). `scripts/import-snapshot.mjs` documents every reading
+rule and prints a report — row counts, valuation, how many lines it could not price and
+how many carry a recorded location. Read that report; it is where a bad workbook shows up.
+(The old hand-written `seed_inventory.sql` had drifted to a different snapshot and was
+missing five columns; generating removes that failure mode. The import step is generated
+for the same reason — the July snapshot's importer was ad-hoc and lost.)
 - **Git**: branch `main`, single clean root commit (history reset 2026-08-16).
 - **Deploy**: GitHub Pages project site at `https://prcdepartment.github.io/prc-wh/`,
   built by `.github/workflows/deploy.yml` on every push to `main`.
@@ -2163,3 +2175,119 @@ errors on a fresh tab. `npm run build` passes.
 `nodeById is not defined` kept reappearing from the intermediate edit states long after
 the build was clean, because the console buffer survives hard navigation. A fresh tab is
 what settles it — that is now three sessions in a row.
+
+### 2026-09-02 — Session: September stock snapshot imported; storage locations become real
+
+New source: `sample/MCC. PRC. WM. CW Taytay Inventory. 2026 09 02.xlsx`. It is not a
+refill of the July workbook — it is shaped differently, drops four columns and adds a
+hidden sheet that changes what the floor plan is able to claim.
+
+**The reading rules are now a committed script, not a one-off.** `npm run import -- "<xlsx>"`
+(`scripts/import-snapshot.mjs`) regenerates `/private-data/{inventory,ledger,safekeepingSheets}.js`;
+`npm run seed` then turns those into the SQL. The July generator was ad-hoc and was not
+kept, so this file had to be decoded from scratch — that cost is paid once now. Reading
+the workbook needs no npm package: `scripts/lib/xlsx.mjs` walks the ZIP with node's own
+`zlib` (ZIP64-aware) and parses the sheet XML, per the standing note that this machine
+has no Python and the app carries only five runtime dependencies.
+
+**What the workbook changed.**
+
+| | July | September |
+|---|---|---|
+| Warehouse SOH | sheet "CW SOH", 779 lines | sheet "SOH", **827** |
+| Safekeeping SOH | its own sheet, 132 | same sheet, **178**, split by Project Origin |
+| Movement | CW + Safekeeping sheets apart | one "Incoming" (373) + one "Outgoing" (478) |
+| Item Group / Trades | columns on the sheet | **gone** — taken from `item_master` instead |
+| Unit Price / Total Value | columns on the sheet | **gone** — see PRICE below |
+| Storage location | nothing, anywhere | **"Item per location bin", 1,083 real bin codes** |
+
+**One rule partitions everything: Project Origin.** Rows reading "Central Warehouse
+Taytay" are the warehouse's own material; anything else is a project's material held for
+safekeeping. Applied identically to all three sheets, so a line's stock and its movement
+can never land on opposite sides of the split. Result: inventory 827, safekeeping_soh
+178, safekeeping_incoming 372, safekeeping_outgoing 262, ledger 214.
+
+**Taxonomy now comes from the item master, and that is an upgrade.** The sheet's own
+"Trades" column was a charge code (GEN REQ / MEPF / STRUCT / ARCHI) that cuts across item
+types; the master resolved **all 1,005** codes in the sheet. Two of its values sit outside
+the app's own vocabulary and are mapped explicitly — `Asset` to `Reusable`, and the item
+group `Drywalls` to `Ceiling` — both being the conventions the July snapshot already used,
+so an item does not change category between one month and the next. Caught by a taxonomy
+check, not by eye.
+
+**PRICE — the one place this workbook cannot be trusted.** The SOH sheet has no price
+column at all. The location sheet has one, and it is broken: it prints ₱324,821 for both a
+fluorescent tube and a coil of THHN wire, and ₱120,535 for a ¾-inch roll of teflon tape
+that July priced at ₱6.25. Valuing the warehouse off it gives **₱973M against ₱100M in
+July**, with 86% of the overstatement in twelve lines — the signature of a lookup that has
+slipped its rows. So prices are **carried forward** from the previous snapshot on item code
+plus specific description, then on item code alone: **₱105,212,151**, a believable +5%, with
+**50 lines unpriced** (holding 1,569 units, most of them zero-stock rows) left at zero,
+which the app already reports as "no price recorded". Condition class is carried the same
+way (7 lines end with none). **Worth raising with the warehouse team: where does the
+authoritative price list live now that the SOH sheet no longer carries one?**
+
+**STORAGE LOCATION IS NO LONGER MODELLED.** The hidden sheet addresses lines as
+`AREA-Rn-LL-BBB` — and the areas and counts are the ones this map was already drawn from.
+MEPF has racks R1–R3 and its bay numbers stop at **13**, which is exactly the long single
+run against the west wall; STRUC and ARCHI have one rack each; levels run 1–5. That is not
+a coincidence to be argued about, it is the same building. So `placement()` is now a
+lookup where a record exists and the old rule only where one does not, which is precisely
+the fix this file has been carrying as "the eventual fix" since the floor plan was built.
+
+- `location` and `bin_count` are new columns on `public.inventory`
+  (`supabase/migrations/2026-09-02_inventory_location.sql` — **run this before the seeds**).
+- `recordedPlacement()` decodes an address; the sheet numbers racks *within* an area
+  (`STRUC-R1`) while the map numbers them across the shed (that run is `R4`), hence the
+  per-area rack tables. A bay outside what the racking drawing provides is treated as a
+  typing error — the area is kept, the impossible bay dropped.
+- A recorded address **beats** the derived rule, including `isHighValue`: the warehouse is
+  right about its own building. Recorded lines claim their bays first; modelled lines then
+  fill only what is left, so a guess is never stacked on a record. Measured: 0 collisions.
+- **754 of 827 lines placed from the record**, 678 of them to a specific bay. `locationOf()`
+  reports `recorded` / `recordedArea` per line, so the Material Profile says "Recorded bin",
+  "Recorded area" or "Inferred" and the floor-plan panel now reads "389 of 407 lines are at
+  their recorded bin; the rest are modelled" instead of disclaiming the whole map.
+
+**Bug found in `locationOf()` while verifying, and it predates this work.** It built
+`{ area: area.name, …, ...loc }` with the spread LAST, so `loc.area` — an internal id —
+overwrote the area name that had just been put there, and the Material Profile printed
+`mepfs` at the reader. Spread first now, display fields after; `areaId` keeps the raw value.
+
+**Consequences of the new data, all real rather than defects:**
+- The **Incoming** tile reads 0 and Activity reports 1 receipt. The Incoming sheet is
+  almost entirely project material arriving for safekeeping — only **1** of 373 rows is
+  warehouse-owned — so the warehouse's own receipts are not in this workbook at all.
+- The floor plan's **Safekeeping area now holds 16 lines, not hundreds**. It was only ever
+  populated by trade fall-through; those lines have gone to their recorded homes. The
+  project-owned stock that area actually represents lives in `safekeeping_soh`, which the
+  floor plan does not yet plot — a worthwhile next step.
+- Stock turnover and non-moving value shift because the ledger window went 125 → 166 days
+  and covers 96 item codes.
+
+**Also:** the seed now emits `delete from <table> where id > <max>` before each id-keyed
+insert. Upserting alone would have left the tail of a longer previous snapshot behind —
+stock that no longer exists, still on the dashboard — the month a table shrinks. Nothing
+is dropped this run; every table grew. `TODAY` in `src/lib/format.js` moved 2026-07-24 to
+**2026-09-02**, which is the ledger's own base and must track `SNAPSHOT_DATE`.
+
+**Verified.** A generated-data check (invariants, keys, taxonomy, ledger, locations) and a
+placement check bundled with esbuild and run under Node both pass: `totalQty ===
+available + reserved` and `=== beginning + in - out` hold on all 827 lines (the source
+sheet's own arithmetic was already consistent on all 1,005), every recorded line sits at
+its recorded bay, no line is both recorded and inferred, and area capacity never exceeds
+positions. In the browser against a temporary fixture (deleted afterwards; `dist/`
+confirmed free of any item code, description, location or figure): dashboard reads
+498,728 units with 485,934 + 12,794 matching it exactly, Reports ₱105,212,151 over 827
+SKUs, Safekeeping 9 projects / 264,959 SOH / 159,298 in / 69,896 out, Rack 1 draws its 13
+bays over 5 levels with per-cell counts, all four placement kinds show the right
+provenance label, and no page-level horizontal scroll at 375px. `npm run build` passes and
+the only console error is the expected Supabase 400 under the session-less demo login.
+
+**To put this live** (Supabase SQL Editor, in order): run
+`supabase/migrations/2026-09-02_inventory_location.sql`, then paste
+`supabase/seed/01..04_seed.sql` in order. Four parts now rather than three — the dataset
+grew past the editor's ~1 MB submission cap by one more file.
+
+**Not done, deliberately:** the previous snapshot's master modules are kept at
+`private-data/snapshots/2026-07-21/` (gitignored) in case a figure needs to be traced back.

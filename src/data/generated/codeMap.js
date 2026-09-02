@@ -9,7 +9,7 @@
 export const CODE = {
   "generatedFrom": "src/**",
   "fileCount": 77,
-  "totalLines": 18124,
+  "totalLines": 17265,
   "counts": {
     "entry": 2,
     "component": 17,
@@ -666,8 +666,8 @@ export const CODE = {
       "path": "src/components/floorplan/LocationPanel.jsx",
       "name": "LocationPanel.jsx",
       "kind": "floorplan",
-      "lines": 103,
-      "bytes": 4804,
+      "lines": 111,
+      "bytes": 5374,
       "imports": [
         "src/data/warehouseMap.js",
         "src/lib/format.js",
@@ -810,8 +810,8 @@ export const CODE = {
       "path": "src/components/processflow/FlowDiagram.jsx",
       "name": "FlowDiagram.jsx",
       "kind": "processflow",
-      "lines": 359,
-      "bytes": 14268,
+      "lines": 389,
+      "bytes": 16795,
       "imports": [
         "src/data/processFlow.js",
         "src/lib/icons.jsx"
@@ -852,8 +852,8 @@ export const CODE = {
       "path": "src/components/processflow/pfUi.jsx",
       "name": "pfUi.jsx",
       "kind": "processflow",
-      "lines": 144,
-      "bytes": 4980,
+      "lines": 169,
+      "bytes": 6177,
       "imports": [
         "src/data/processFlow.js",
         "src/lib/icons.jsx"
@@ -1140,23 +1140,15 @@ export const CODE = {
       "path": "src/data/processFlow.js",
       "name": "processFlow.js",
       "kind": "data",
-      "lines": 2370,
-      "bytes": 109989,
+      "lines": 1198,
+      "bytes": 65742,
       "imports": [
         "src/data/roles.js"
       ],
       "packages": [],
       "dbOps": [
         {
-          "op": "select",
-          "table": "item_master"
-        },
-        {
           "op": "auth.signIn",
-          "table": null
-        },
-        {
-          "op": "auth.signOut",
           "table": null
         },
         {
@@ -1313,8 +1305,8 @@ export const CODE = {
       "path": "src/data/warehouseMap.js",
       "name": "warehouseMap.js",
       "kind": "data",
-      "lines": 574,
-      "bytes": 26713,
+      "lines": 672,
+      "bytes": 31864,
       "imports": [
         "src/data/insights.js"
       ],
@@ -1353,8 +1345,8 @@ export const CODE = {
       "path": "src/lib/format.js",
       "name": "format.js",
       "kind": "lib",
-      "lines": 106,
-      "bytes": 4000,
+      "lines": 109,
+      "bytes": 4213,
       "imports": [],
       "packages": [],
       "dbOps": [],
@@ -1396,8 +1388,8 @@ export const CODE = {
       "path": "src/lib/hydrate.js",
       "name": "hydrate.js",
       "kind": "lib",
-      "lines": 204,
-      "bytes": 9127,
+      "lines": 205,
+      "bytes": 9186,
       "imports": [
         "src/data/deliveryTracker.js",
         "src/data/deliveryTrackerSheet.js",
@@ -1761,8 +1753,8 @@ export const CODE = {
       "path": "src/pages/MaterialProfile.jsx",
       "name": "MaterialProfile.jsx",
       "kind": "page",
-      "lines": 198,
-      "bytes": 9269,
+      "lines": 211,
+      "bytes": 10102,
       "imports": [
         "src/components/ui.jsx",
         "src/context/ThemeContext.jsx",
@@ -1809,8 +1801,8 @@ export const CODE = {
       "path": "src/pages/ProcessFlow.jsx",
       "name": "ProcessFlow.jsx",
       "kind": "page",
-      "lines": 1015,
-      "bytes": 40607,
+      "lines": 1086,
+      "bytes": 42615,
       "imports": [
         "src/components/processflow/ErdDiagram.jsx",
         "src/components/processflow/FlowDiagram.jsx",
@@ -2091,8 +2083,8 @@ export const CODE = {
       "path": "src/styles/processflow.css",
       "name": "processflow.css",
       "kind": "style",
-      "lines": 740,
-      "bytes": 35531,
+      "lines": 804,
+      "bytes": 39072,
       "imports": [],
       "packages": [],
       "dbOps": [],

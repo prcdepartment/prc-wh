@@ -46,9 +46,12 @@ export default function MaterialProfile() {
     { label: 'Damaged', value: item.damagedQty, color: S.damaged },
   ]
 
-  // Location now follows the real facility from the CW Taytay Warehouse Plan — site
-  // area, then material area, then rack / bay / level — instead of the old synthetic
-  // Zone-Rack-Shelf-Bin columns, which described no building that exists.
+  // Location follows the real facility from the CW Taytay Warehouse Plan — site area,
+  // then material area, then rack / bay / level — instead of the old synthetic
+  // Zone-Rack-Shelf-Bin columns, which described no building that exists. Since the
+  // 2026-09-02 snapshot the address itself is usually the warehouse's own bin record;
+  // `place.recorded` says whether this particular line's is, because "go to MEPF R1
+  // bay 7" is worth acting on only if somebody actually put it there.
   const place = locationOf(item)
   const loc = place
     ? place.level === 'site'
@@ -135,7 +138,10 @@ export default function MaterialProfile() {
               </div>
             </div>
           </Card>
-          <Card title="Warehouse Location">
+          <Card
+            title="Warehouse Location"
+            sub={place ? (place.recorded ? 'Recorded bin' : place.recordedArea ? 'Recorded area' : 'Inferred') : undefined}
+          >
             <div className="location-crumb">
               {loc.map((s, i) => (
                 <div key={s.l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -143,6 +149,13 @@ export default function MaterialProfile() {
                   {i < loc.length - 1 && <Icon name="chevronDown" size={16} className="arrow" style={{ transform: 'rotate(-90deg)' }} />}
                 </div>
               ))}
+            </div>
+            <div className="card-note">
+              {place?.recorded
+                ? 'Read from the warehouse’s own bin list in the current stock snapshot.'
+                : place?.recordedArea
+                ? 'The warehouse recorded the area but not the bay, so the bay shown is inferred.'
+                : 'No bin was recorded for this line, so its position is inferred from item group, value and trade.'}
             </div>
           </Card>
         </div>

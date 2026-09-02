@@ -48,6 +48,18 @@ function insert(table, columns, rows, toValues, conflict = columns[0]) {
   const updates = columns.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`).join(', ')
   const tail = conflict ? `\non conflict (${conflict}) do update set ${updates};` : ';'
   const out = [`-- ${table}: ${rows.length} rows`]
+
+  // Upserting alone is not enough to make a re-seed correct. These tables are keyed on
+  // a row number that is assigned in sheet order, so a snapshot with FEWER lines than
+  // the one before would upsert over the first N and silently leave the tail of the
+  // previous snapshot behind — stock that no longer exists, still on the dashboard.
+  // Deleting past the new high-water mark first is what makes a re-seed a replacement
+  // rather than a merge. (Sept grew on every table, so nothing is dropped this run;
+  // it is here for the month one of them shrinks.)
+  if (keys.length === 1 && ['id', 'no'].includes(keys[0])) {
+    const max = rows.reduce((m, r) => Math.max(m, Number(r[keys[0]] ?? r.id ?? r.no) || 0), 0)
+    out.push(`delete from public.${table} where ${keys[0]} > ${max};`)
+  }
   const CHUNK = 200
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK)
@@ -93,13 +105,15 @@ add(
     ['id', 'item_code', 'description', 'detailed_description', 'trade_l1', 'trade_l2', 'material_type', 'uom',
       'total_qty', 'beginning_qty', 'period_in', 'period_out', 'available_qty', 'reserved_qty', 'incoming_qty',
       'outgoing_qty', 'damaged_qty', 'min_level', 'issue_frequency', 'last_movement_offset', 'unit_price',
-      'discounted_price', 'inventory_value', 'condition_class', 'brand', 'model', 'zone', 'rack', 'shelf', 'bin'],
+      'discounted_price', 'inventory_value', 'condition_class', 'brand', 'model', 'location', 'bin_count',
+      'zone', 'rack', 'shelf', 'bin'],
     inventory,
     (r) => [n(r.id), q(r.itemCode), q(r.description), q(r.detailedDescription), q(r.tradeL1), q(r.tradeL2),
       q(r.materialType), q(r.uom), n(r.totalQty), n(r.beginningQty), n(r.periodIn), n(r.periodOut),
       n(r.availableQty), n(r.reservedQty), n(r.incomingQty), n(r.outgoingQty), n(r.damagedQty), n(r.minLevel),
       n(r.issueFrequency), n(r.lastMovementOffset), n(r.unitPrice), n(r.discountedPrice), n(r.inventoryValue),
-      q(r.conditionClass), q(r.brand), q(r.model), q(r.zone), q(r.rack), q(r.shelf), q(r.bin)]
+      q(r.conditionClass), q(r.brand), q(r.model), q(r.location), n(r.binCount),
+      q(r.zone), q(r.rack), q(r.shelf), q(r.bin)]
   )
 )
 

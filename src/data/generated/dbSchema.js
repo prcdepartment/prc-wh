@@ -833,6 +833,28 @@ export const DB = {
           "references": null
         },
         {
+          "name": "location",
+          "type": "text",
+          "pk": false,
+          "notNull": false,
+          "unique": false,
+          "identity": false,
+          "default": null,
+          "check": null,
+          "references": null
+        },
+        {
+          "name": "bin_count",
+          "type": "int",
+          "pk": false,
+          "notNull": true,
+          "unique": false,
+          "identity": false,
+          "default": "0",
+          "check": null,
+          "references": null
+        },
+        {
           "name": "zone",
           "type": "text",
           "pk": false,

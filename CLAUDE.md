@@ -2385,3 +2385,56 @@ hover-dependent styling by what is painted, not by what `getComputedStyle` repor
 
 **3. Login tagline** — "Building a First-World Philippines" is now **"Engineering a
 First-World Philippines"**, matching the corporate line. One occurrence, in `Login.jsx`.
+
+### 2026-08-17 — Session: plates per section, area cylinder, hover-only sections
+
+**Level 1 — a plate on every section, not a corner block.** Each area's identity plate is
+now pinned to that area's own top-left corner, so it is read against the shape it
+describes. Plates are translucent (`fill-opacity: 0.82`) because on this level a plate
+sits on top of the block it names and has to read as glass over the drawing rather than
+a hole in it. Occupancy is a bar plus a figure now instead of a sentence; where nothing
+records a capacity the track is drawn empty and the figure is a dash — an outdoor yard
+with no capacity basis must not read as 0% full.
+
+The plate **grows for a wrapped name**. At a fixed height the second line of MATERIAL
+RECOVERY FACILITY ran into the floor-area row beneath it; the height is now computed
+from the content (42.4 units for one line, 53.3 for two) and the icon centres on the
+name block rather than on the whole plate.
+
+**Level 2 — the plate moved off the drawing.** A permanent 190-unit gutter is added to
+the right of the plan, so the hover plate has somewhere to go that is not on top of the
+racks. It is part of the viewBox at all times rather than appearing with the plate:
+growing the viewBox on hover would resize the whole drawing under the pointer.
+
+**The Sections toggle is gone; the blocks show on hover.** The hulls stay in the DOM so
+they remain hoverable and clickable, but paint nothing at rest — the plan reads as pure
+racking until you point at an area. They need `pointer-events: all` precisely BECAUSE
+the fill is transparent, and they sit before the racks in the DOM so a rack on top of a
+hull still receives the pointer.
+
+**Level 2's Material Areas list is a cylinder.** `CapacityCylinder.jsx` (new) is the
+level-1 chart generalised to take a `segments` array, base-first, with the last segment
+drawn as clear glass. Level 1 stacks warehouse / safekeeping / free; level 2 stacks the
+five material areas in their own colours plus free space, and clicking a legend row
+selects that area on the plan. Verified both sum to 100: level 1 read 32 / 21 / 47, level
+2 read 20 / 2 / 6 / 21 / 4 / 47.
+
+**Level 3 — the figures moved under the elevation.** That card had a lot of dead space
+below the drawing; `LocationStats` is now exported from `LocationPanel` and rendered
+there, which leaves the whole right-hand column to the list. The list itself switched to
+the dashboard's own `CompactTable` — Item Code, a stacked Material Description (detail
+plus the trade path), Available and UOM — so a row here lines up with a row on the
+Inventory Overview. Measured 750 px for both columns at 1440×900.
+
+**Verified** against a temporary anonymised fixture (removed afterwards; `main.jsx`
+restored and `dist/` confirmed clean) across eighteen view/theme combinations at
+1440×900 plus three at 375×812: zero labels clipped, zero overlaps, nothing outside a
+scroll container. Hover exercised on the cylinder bands, the level-2 hulls and the legend
+rows.
+
+**Two measurement notes.** Supabase auth hangs in this sandbox, so the demo login never
+completes; seeding `localStorage['wms-demo-session']` is what gets past the login wall
+for verification. And the hidden pane's stale-style problem bit again — a hovered hull
+reported `fill-opacity: 0` while its class list already had `is-hover`. Read the class
+list, or re-read after a real load; do not trust a computed colour taken right after a
+class change.

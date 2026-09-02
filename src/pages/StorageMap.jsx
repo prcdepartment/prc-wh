@@ -8,7 +8,8 @@ import {
 import SitePlan from '../components/floorplan/SitePlan'
 import WarehousePlan from '../components/floorplan/WarehousePlan'
 import RackElevation from '../components/floorplan/RackElevation'
-import LocationPanel from '../components/floorplan/LocationPanel'
+import LocationPanel, { LocationStats } from '../components/floorplan/LocationPanel'
+import { DescCell } from '../components/MaterialList'
 import { Card } from '../components/ui'
 import FacilityCapacityGauge from '../components/FacilityCapacityGauge'
 import { num } from '../lib/format'
@@ -35,6 +36,18 @@ const LEVELS = [
   { id: 'rack', label: 'Racking', icon: 'layers' },
 ]
 
+// Same shape as the Inventory Overview's compact list, so a row here reads the same as
+// a row there: code, a stacked description, then the figures.
+const RACK_LIST_COLUMNS = [
+  { key: 'code', label: 'Item Code', mono: true, width: '20%', render: (r) => r.itemCode },
+  {
+    key: 'desc', label: 'Material Description', width: '46%',
+    render: (r) => <DescCell title={r.description} subs={[r.detailedDescription, `${r.tradeL1} · ${r.tradeL2}`]} />,
+  },
+  { key: 'qty', label: 'Available', num: true, width: '17%', render: (r) => num(r.availableQty) },
+  { key: 'uom', label: 'UOM', width: '17%', render: (r) => r.uom },
+]
+
 const rackLabel = (id) =>
   id === 'CANT' ? CANTILEVER.name
     : id === 'FLOOR' ? FLOOR_AREA.name
@@ -49,10 +62,9 @@ export default function StorageMap() {
   const [hovered, setHovered] = useState(null)
   const [cell, setCell] = useState(null)
 
-  // Both warehouse view options live in the query string so a view can be linked.
-  // Portrait and sections-on are the defaults, so only the non-default states appear.
+  // Orientation lives in the query string so a view can be linked. Portrait is the
+  // default, so only the rotated state appears there.
   const landscape = params.get('rot') === 'l'
-  const showSections = params.get('sections') !== '0'
 
   // Rebuilt when hydration swaps the rows in — the same trigger the dashboard's
   // insight lists use. Without it the map would stay frozen at the empty pre-login
@@ -129,7 +141,7 @@ export default function StorageMap() {
           />
         ) : (
           <Card title="Warehouse Capacity" icon="warehouse" className="fp-side-card fp-cap-card">
-            <FacilityCapacityGauge bare />
+            <FacilityCapacityGauge />
           </Card>
         )}
       </Shell>
@@ -152,14 +164,6 @@ export default function StorageMap() {
           right={
             <div className="fp-map-tools">
               <button
-                className={`btn btn-sm${showSections ? ' btn-primary' : ''}`}
-                onClick={() => go({ sections: showSections ? '0' : null })}
-                title={showSections ? 'Hide the section-area highlights' : 'Show the section-area highlights'}
-                aria-pressed={showSections}
-              >
-                <Icon name="layers" size={14} /> Sections
-              </button>
-              <button
                 className="btn btn-sm"
                 onClick={() => go({ rot: landscape ? null : 'l' })}
                 title={landscape ? 'Rotate to portrait — matches the site plan' : 'Rotate to landscape — the reference deck’s presentation'}
@@ -175,7 +179,6 @@ export default function StorageMap() {
               hovered={hovered}
               onHover={setHovered}
               orient={landscape ? 'landscape' : 'portrait'}
-              showSections={showSections}
               onSelect={(id) => go({ area: area === id ? null : id })}
               onOpenRack={(id) => go({ level: 'rack', rack: id, area: id === 'CANT' || id === 'FLOOR' ? 'safekeeping' : RACKS.find((r) => r.id === id)?.area || area })}
             />
@@ -205,28 +208,8 @@ export default function StorageMap() {
             }
           />
         ) : (
-          <Card title="Material Areas" icon="layers">
-            <div className="fp-pick">Pick an area on the plan, or a row below.</div>
-            <div className="fp-arealist">
-              {WH_AREAS.map((a) => {
-                const c = areaCapacity(a.id)
-                const p = areaItems(a.id)
-                const pct = c.positions ? Math.round((c.used / c.positions) * 100) : 0
-                return (
-                  <button key={a.id} className={`fp-arearow fp-t-${a.role}`} onClick={() => go({ area: a.id })}
-                    onMouseEnter={() => setHovered(a.id)} onMouseLeave={() => setHovered(null)}>
-                    <div className="fp-arearow-main">
-                      <div className="n">{a.name}</div>
-                      <div className="s">{num(p.length)} lines · {num(c.positions)} {c.unit}</div>
-                    </div>
-                    <div className="fp-arearow-bar" title={`${pct}% of positions in use`}>
-                      <span style={{ width: `${Math.min(pct, 100)}%` }} />
-                    </div>
-                    <span className="tabular fp-arearow-pct">{pct}%</span>
-                  </button>
-                )
-              })}
-            </div>
+          <Card title="Area Capacity" icon="layers" className="fp-side-card fp-cap-card">
+            <FacilityCapacityGauge scope="areas" onPick={(id) => go({ area: id })} />
           </Card>
         )}
       </Shell>
@@ -264,6 +247,10 @@ export default function StorageMap() {
           <span className="fp-legend-i"><i className="fp-cellsw is-available" />Available</span>
           <span className="fp-legend-i"><i className="fp-cellsw is-occupied" />Occupied</span>
         </div>
+        {/* The figures live here rather than on the panel: this card had a lot of dead
+            space under the elevation, and moving them across leaves the whole
+            right-hand column to the list. */}
+        <LocationStats pool={cellItems ? cellItems.list : allInRack} />
       </Card>
 
       <LocationPanel
@@ -273,6 +260,8 @@ export default function StorageMap() {
         pool={cellItems ? cellItems.list : allInRack}
         capacity={!cellItems && occ ? { ...occ, unit: 'pallet positions' } : null}
         emptyText={cellItems ? 'This position is empty.' : 'Nothing is held here.'}
+        showStats={false}
+        columns={RACK_LIST_COLUMNS}
         actions={cellItems && <button className="btn btn-sm btn-ghost" onClick={() => setCell(null)}>Show whole rack</button>}
       />
     </Shell>

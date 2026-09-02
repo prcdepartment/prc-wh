@@ -3,63 +3,69 @@ import { wrapLabel } from './planText'
 
 // An area's identity plate, drawn INSIDE the plan SVG.
 //
-// It lives in the plan's own coordinate space rather than as HTML over the top, which is
-// what makes the leader line free: both ends are already in the same units, so joining a
-// block on the drawing to its plate is one polyline. The trade-off is that the type
-// scales with the drawing, so `u` (viewBox units per rendered pixel) is passed in and
-// every size is set against it.
+// Drawing it in the plan's own coordinate space is what makes a leader line free: both
+// ends are already in the same units, so joining a block to its plate is one polyline.
+// The trade-off is that type scales with the drawing, so `u` (viewBox units per rendered
+// pixel) is passed in and every size is set against it.
 //
-// Four fields, and only four: colour + icon, name, floor area, occupancy.
+// Four fields: colour + icon, name, floor area, and occupancy as a bar plus a figure.
+// Where nothing records a capacity the track is drawn empty and the figure is a dash —
+// an area with no capacity basis must not read as 0% full.
 
-export const CARD_W = 196
-export const CARD_H = 50
-const PAD = 11
-const ICON = 18
-const GAP = 9
-
-// Where a stack of plates sits: the drawing's top-right corner, like a title block.
-export const stackAt = (vbW, n, gap = 7) => ({
-  x: vbW - CARD_W - 12,
-  y: 12,
-  h: n * CARD_H + (n - 1) * gap,
-})
+export const CARD_W = 172
+export const CARD_H = 42
+const PAD = 9
+const ICON = 13
 
 export default function PlanIdCard({ x, y, area, m2, pct, u = 1, active }) {
   const s = (px) => px * u
-  const textX = x + PAD + s(ICON) + GAP
-  const textW = CARD_W - (PAD + s(ICON) + GAP) - PAD
-  // A long name (MATERIAL RECOVERY FACILITY) is wider than the plate at heading size.
-  // Shrinking it to fit one line would drop it to ~6 px on screen, so it wraps to two
-  // instead and the plate is sized for that.
-  const nameSize = s(10.5)
+  const textX = x + PAD + s(ICON) + s(6)
+  const textW = CARD_W - (PAD + s(ICON) + s(6)) - PAD
+  const nameSize = s(9.5)
   const nameLines = wrapLabel(area.name.toUpperCase(), textW, nameSize).slice(0, 2)
   const nameStep = nameSize * 1.15
   const metaSize = s(9.5)
-  // Centre the whole text block — name lines plus the meta row — in the plate.
-  const blockH = nameLines.length * nameStep + s(4) + metaSize
-  const top = y + (CARD_H - blockH) / 2
+
+  // The plate GROWS for a wrapped name. At a fixed height the second line of
+  // MATERIAL RECOVERY FACILITY ran straight into the floor-area row beneath it.
+  const padY = s(8)
+  const gap = s(6)
+  const nameBlock = nameLines.length * nameStep
+  const cardH = padY + nameBlock + gap + metaSize + padY
+  const metaY = y + padY + nameBlock + gap + metaSize * 0.85
+
+  const barW = 40
+  const barX = x + CARD_W - PAD - barW - s(26)
+  const has = pct != null
 
   return (
     <g className={`fp-id fp-t-${area.role}${active ? ' is-active' : ''}`} pointerEvents="none">
-      <rect className="fp-id-bg" x={x} y={y} width={CARD_W} height={CARD_H} rx="6" />
-      <rect className="fp-id-bar" x={x} y={y} width="4" height={CARD_H} rx="2" />
-      <g transform={`translate(${x + PAD} ${y + CARD_H / 2 - s(ICON) / 2})`}>
+      <rect className="fp-id-bg" x={x} y={y} width={CARD_W} height={cardH} rx="7" />
+      <rect className="fp-id-bar" x={x} y={y + s(7)} width="3" height={cardH - s(14)} rx="1.5" />
+
+      {/* icon centred on the name block, not on the whole plate */}
+      <g transform={`translate(${x + PAD + 2} ${y + padY + nameBlock / 2 - s(ICON) / 2})`}>
         <Icon name={area.icon} size={s(ICON)} />
       </g>
-      <text className="fp-id-name" x={textX} y={top + nameSize * 0.85} style={{ fontSize: nameSize }}>
+      <text className="fp-id-name" x={textX} y={y + padY + nameSize * 0.85} style={{ fontSize: nameSize }}>
         {nameLines.map((l, i) => <tspan key={i} x={textX} dy={i === 0 ? 0 : nameStep}>{l}</tspan>)}
       </text>
-      <text
-        className="fp-id-meta" x={textX}
-        y={top + nameLines.length * nameStep + s(4) + metaSize * 0.85}
-        style={{ fontSize: metaSize }}
-      >
-        <tspan>{m2 == null ? '—' : `${Math.round(m2).toLocaleString()} m²`}</tspan>
-        <tspan className="fp-id-sep" dx={s(6)}>·</tspan>
-        {pct == null
-          ? <tspan className="fp-id-none" dx={s(6)}>no capacity data</tspan>
-          : <tspan className="fp-id-pct" dx={s(6)}>{Math.round(pct)}% occupied</tspan>}
+
+      {/* floor area, then the occupancy bar and its figure */}
+      <text className="fp-id-m2" x={x + PAD + 2} y={metaY} style={{ fontSize: s(8.5) }}>
+        {m2 == null ? '—' : `${Math.round(m2).toLocaleString()} m²`}
       </text>
+      <rect className="fp-id-track" x={barX} y={metaY - s(4.5)} width={barW} height={s(4.5)} rx={s(2.25)} />
+      {has && pct > 0 && (
+        <rect
+          className="fp-id-fill" x={barX} y={metaY - s(4.5)}
+          width={Math.max(s(3), (Math.min(pct, 100) / 100) * barW)} height={s(4.5)} rx={s(2.25)}
+        />
+      )}
+      <text
+        className={has ? 'fp-id-pct' : 'fp-id-none'}
+        x={x + CARD_W - PAD} y={metaY} textAnchor="end" style={{ fontSize: metaSize }}
+      >{has ? `${Math.round(pct)}%` : '—'}</text>
     </g>
   )
 }

@@ -32,11 +32,18 @@ const inset = (r, d = 1) => ({ x: r.x + d, y: r.y + d, w: Math.max(0, r.w - d * 
 // quiet beneath it. A run only one rack deep gets no icon at all — there is no room.
 const iconFor = (across) => (across < 46 ? 0 : clamp(across * 0.28, 0, 34))
 
+// A gutter is added to the RIGHT of the drawing so the hover plate has somewhere to go
+// that is not on top of the plan. It is part of the viewBox permanently rather than
+// appearing with the plate: growing the viewBox on hover would resize the whole drawing
+// under the pointer.
+const GUTTER = 190
+
 export default function WarehousePlan({
-  selected, onSelect, onOpenRack, hovered, onHover, orient = 'portrait', showSections = true,
+  selected, onSelect, onOpenRack, hovered, onHover, orient = 'portrait',
 }) {
   const landscape = orient === 'landscape'
-  const vb = landscape ? { w: WH_VB.h, h: WH_VB.w } : WH_VB
+  const plan = landscape ? { w: WH_VB.h, h: WH_VB.w } : WH_VB
+  const vb = { w: plan.w + GUTTER, h: plan.h }
 
   // Portrait (ix, iy) -> the shown orientation. Landscape is the deck's rotation:
   // x = maxIy - iy, y = ix, so the office end sits on the left and the runs read
@@ -111,7 +118,7 @@ export default function WarehousePlan({
   // Hover only, deliberately. The plate sits over the top-right of the drawing, so
   // leaving it up for a SELECTED area parked it permanently on the heads of racks 10
   // and 11 — and a selected area already has the full panel beside the map.
-  const plateBox = { x: vb.w - CARD_W - 14, y: 14 }
+  const plateBox = { x: plan.w + (GUTTER - CARD_W) / 2, y: 16 }
   const hotArea = (hovered && AREA_BY_ID[hovered]) || null
   const plate = hotArea && (() => {
     const r = mr(hotArea.hull[0])
@@ -155,8 +162,11 @@ export default function WarehousePlan({
         )
       })}
 
-      {/* section-area highlights — the deck's own blocks, switchable */}
-      {showSections && WH_AREAS.map((a) => {
+      {/* Section-area blocks. Always rendered so they stay hoverable, but painted only
+          when hovered or selected — the plan reads as pure racking at rest, which is
+          what the old Sections toggle was for. They sit BEFORE the racks in the DOM, so
+          a rack on top of a hull still receives the pointer. */}
+      {WH_AREAS.map((a) => {
         const active = selected === a.id
         const hov = hovered === a.id
         return (

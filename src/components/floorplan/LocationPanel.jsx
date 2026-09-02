@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { totals } from '../../data/warehouseMap'
+import { CompactTable } from '../MaterialList'
 import { num, peso } from '../../lib/format'
 import Icon from '../../lib/icons'
 
@@ -15,7 +16,26 @@ const PAGE = 40
 
 // The "what is stored here" panel. Every level of the map feeds it the same shape:
 // a title, an optional capacity read-out, and the material lines in that location.
-export default function LocationPanel({ title, sub, role, pool, capacity, note, actions, emptyText }) {
+// The six figures for a location. Exported so the racking level can put them under its
+// elevation — that card had a lot of dead space below the drawing, and moving them there
+// leaves the whole right-hand column to the list.
+export function LocationStats({ pool }) {
+  const t = totals(pool)
+  return (
+    <div className="fp-stats">
+      <div className="fp-stat"><span className="l">Material lines</span><span className="v tabular">{num(t.lines)}</span></div>
+      <div className="fp-stat"><span className="l">Stock on hand</span><span className="v tabular">{num(t.qty)}</span></div>
+      <div className="fp-stat"><span className="l">Available</span><span className="v tabular">{num(t.available)}</span></div>
+      <div className="fp-stat"><span className="l">Reserved</span><span className="v tabular">{num(t.reserved)}</span></div>
+      <div className="fp-stat"><span className="l">Stock value</span><span className="v tabular">{peso(t.value)}</span></div>
+      <div className="fp-stat"><span className="l">Needs attention</span><span className="v tabular">{num(t.low)}</span></div>
+    </div>
+  )
+}
+
+export default function LocationPanel({
+  title, sub, role, pool, capacity, note, actions, emptyText, showStats = true, columns,
+}) {
   const nav = useNavigate()
   const [shown, setShown] = useState(PAGE)
   const t = totals(pool)
@@ -36,14 +56,7 @@ export default function LocationPanel({ title, sub, role, pool, capacity, note, 
 
       {note && <div className="fp-note">{note}</div>}
 
-      <div className="fp-stats">
-        <div className="fp-stat"><span className="l">Material lines</span><span className="v tabular">{num(t.lines)}</span></div>
-        <div className="fp-stat"><span className="l">Stock on hand</span><span className="v tabular">{num(t.qty)}</span></div>
-        <div className="fp-stat"><span className="l">Available</span><span className="v tabular">{num(t.available)}</span></div>
-        <div className="fp-stat"><span className="l">Reserved</span><span className="v tabular">{num(t.reserved)}</span></div>
-        <div className="fp-stat"><span className="l">Stock value</span><span className="v tabular">{peso(t.value)}</span></div>
-        <div className="fp-stat"><span className="l">Needs attention</span><span className="v tabular">{num(t.low)}</span></div>
-      </div>
+      {showStats && <LocationStats pool={pool} />}
 
       {capacity && capacity.positions > 0 && (
         <div className="fp-cap">
@@ -75,6 +88,20 @@ export default function LocationPanel({ title, sub, role, pool, capacity, note, 
         </div>
       )}
 
+      {/* `columns` switches to the dashboard's own compact masterlist table, so a row
+          here lines up column-for-column with a row on the Inventory Overview. */}
+      {columns ? (
+        <div className="fp-list fp-list-table">
+          {pool.length === 0
+            ? <div className="empty">{emptyText || 'No material lines are held here.'}</div>
+            : <CompactTable rows={pool.slice(0, shown)} columns={columns} onRowClick={(r) => nav(`/inventory/${r.id}`)} />}
+          {pool.length > shown && (
+            <button className="btn btn-sm btn-ghost fp-more" onClick={() => setShown(shown + PAGE)}>
+              Show {Math.min(PAGE, pool.length - shown)} more of {num(pool.length)}
+            </button>
+          )}
+        </div>
+      ) : (
       <div className="fp-list">
         {pool.length === 0 && <div className="empty">{emptyText || 'No material lines are held here.'}</div>}
         {pool.slice(0, shown).map((r) => {
@@ -105,6 +132,7 @@ export default function LocationPanel({ title, sub, role, pool, capacity, note, 
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }

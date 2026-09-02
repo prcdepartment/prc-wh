@@ -17,6 +17,17 @@
 :root { --fp-highvalue: #6b3fa0; }
 :root[data-theme='dark'] { --fp-highvalue: #b9a0e0; }
 
+/* --- section blocks show on hover only -----------------------------------
+   The Sections toggle is gone. The hulls stay in the DOM so they remain hoverable and
+   clickable, but they paint nothing at rest — so the plan reads as pure racking until
+   you point at an area. `pointer-events: all` is needed precisely BECAUSE the fill is
+   transparent: a zero-opacity fill still hit-tests, but only if it is painted at all. */
+.fp-hull rect, .fp-hull polygon { fill-opacity: 0; stroke-opacity: 0; pointer-events: all; }
+.fp-hull.is-hover rect, .fp-hull.is-hover polygon,
+.fp-hull.is-active rect, .fp-hull.is-active polygon { fill-opacity: 1; stroke-opacity: 1; }
+.fp-hull .fp-secure-fill { display: none; }
+.fp-hull.is-hover .fp-secure-fill, .fp-hull.is-active .fp-secure-fill { display: block; }
+
 /* --- open flat area: quieter ---------------------------------------------
    It is still clickable — textured, outlined, and it lifts on hover — but it is a big
    block, and at rack strength it pulled the eye away from the racks themselves. */
@@ -25,23 +36,26 @@
 .fp-floorarea.is-active > rect { fill-opacity: 0.66; }
 
 /* --- identity plates on the drawing -------------------------------------
-   These replaced the legend under the plan. They are drawn inside the plan SVG so a
-   leader line to one is just a polyline in the same coordinate space; the trade-off is
-   that their type scales with the drawing, which is what the `u` prop compensates for. */
-.fp-id-stack-bg { fill: var(--surface); fill-opacity: 0.9; stroke: var(--border); stroke-width: 1; }
+   Drawn inside the plan SVG so a leader line to one is just a polyline in the same
+   coordinate space; the trade-off is that their type scales with the drawing, which is
+   what the `u` prop compensates for.
+
+   Deliberately translucent: on level 1 a plate sits on top of the block it describes,
+   so the fill has to read as glass over the drawing rather than as a hole in it. */
 .fp-id-bg {
-  fill: var(--surface); stroke: var(--border-strong); stroke-width: 1;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.16));
+  fill: var(--surface); fill-opacity: 0.82;
+  stroke: var(--c, var(--border-strong)); stroke-opacity: 0.5; stroke-width: 1;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.14));
 }
 .fp-id-bar { fill: var(--c, var(--border-strong)); }
-.fp-id.is-active .fp-id-bg { stroke: var(--c); stroke-width: 1.8; }
+.fp-id.is-active .fp-id-bg { fill-opacity: 0.95; stroke-opacity: 1; stroke-width: 1.6; }
 .fp-id svg { color: var(--c); }
-.fp-id-name { fill: var(--text); font-weight: 800; letter-spacing: 0.5px; }
-.fp-id-meta { fill: var(--text-muted); font-weight: 600; }
-.fp-id-sep { fill: var(--text-faint); }
+.fp-id-name { fill: var(--text); font-weight: 800; letter-spacing: 0.4px; }
+.fp-id-m2 { fill: var(--text-muted); font-weight: 600; }
+.fp-id-track { fill: var(--fp-ink); fill-opacity: 0.18; }
+.fp-id-fill { fill: var(--c); }
 .fp-id-pct { fill: var(--c); font-weight: 800; }
-.fp-id-lines { fill: var(--text-muted); }
-.fp-id-none { fill: var(--text-faint); font-style: italic; font-weight: 500; }
+.fp-id-none { fill: var(--text-faint); font-weight: 700; }
 
 .fp-leader circle { fill: var(--brand-red); }
 .fp-leader polyline { fill: none; stroke: var(--brand-red); stroke-width: 1.6; stroke-dasharray: 4 3; }
@@ -93,6 +107,16 @@
 .cap-3d-l { font-size: 12.5px; font-weight: 700; }
 .cap-3d-p { font-size: 15px; font-weight: 800; color: var(--band); }
 .cap-3d-n { font-size: 10.5px; color: var(--text-muted); min-width: 62px; text-align: right; }
+
+/* --- racking level: figures under the elevation, list fills the column ----
+   The elevation card had a lot of dead space beneath the drawing; the six figures now
+   sit there and the whole right-hand column belongs to the list. */
+.card .fp-stats { margin-top: 14px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.fp-list-table { padding: 0; overflow: auto; }
+.fp-list-table .mini-table { min-width: 0; }
+.fp-list-table .fp-more { margin: 10px auto; display: block; }
+/* the panel is the full column here, so the list gets whatever height is left */
+.fp-panel.is-list-only { max-height: none; }
 
 /* --- level switcher: a stepper, not a tab strip --------------------------- */
 

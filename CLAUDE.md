@@ -2291,3 +2291,47 @@ grew past the editor's ~1 MB submission cap by one more file.
 
 **Not done, deliberately:** the previous snapshot's master modules are kept at
 `private-data/snapshots/2026-07-21/` (gitignored) in case a figure needs to be traced back.
+
+### 2026-09-02 — Session: admin provisioning runbook (`supabase/promote-to-admin.sql`)
+
+Asked to add a real member of staff as an administrator. Creating the login and
+handling its password are dashboard actions for the account owner, not something this
+tooling does, so what landed here is the half that is code: the role.
+
+**The trap worth recording, because it is silent.** `handle_new_user()` maps a new
+signup to a role from the text BEFORE the `@` — `admin`, `warehouse`, `procurement`,
+`site`, `management` — and **everything else falls through to `warehouse`**. That
+mapping was written for the seeded demo logins (`admin@megawide.com.ph` and friends).
+A real staff address like `jdelacruz@megawide.com.ph` therefore produces a *warehouse* account,
+and it does so without any error: the person is created, can sign in, and simply does
+not have the rights anyone expected. Creating the account is only half of making an
+administrator; the profile has to be promoted afterwards.
+
+**`supabase/promote-to-admin.sql`** is that second half — set an email at the top, run
+it in the SQL Editor, read the one-row result. It is idempotent and works whether or not
+the person has ever signed in.
+
+Two things it gets right that a first draft did not:
+
+- It is **one upsert, not an INSERT then an UPDATE**. The signup trigger normally makes
+  the profile row, but where it did not, a bare `UPDATE` matches nothing and reports
+  success — and putting the `INSERT` in a sibling CTE does not fix it, because
+  data-modifying CTEs all run against the same snapshot and cannot see one another's
+  rows, so the `UPDATE` would still miss the row just inserted beside it. Caught while
+  reviewing rather than in the database, which is the cheap place to catch it.
+- It writes **only `role` and `access_level`** on an existing profile, so a name and
+  department someone has already filled in are not flattened back to a placeholder.
+
+The script also carries the reason `guard_role_change()` does not block it: that trigger
+exempts callers whose `auth.uid()` is null, which is exactly what the SQL Editor is —
+the same exemption that made the first admin bootstrappable back in August. From a
+browser the same statement is still refused, which is the asymmetry the guard exists for.
+
+**Adjacent, and still open.** This is finding #1 in the Process Flow module from the
+other direction: the same prefix mapping means that if email signup is enabled on the
+Supabase project, anyone who registers as `admin@` *any domain* is granted admin on this
+application. Adding staff by hand through the dashboard is the safe path precisely
+because it does not depend on that setting; the setting itself still needs checking in
+the Supabase dashboard, and it cannot be read from the code.
+
+No password, and no user's credentials, are recorded in this repository.

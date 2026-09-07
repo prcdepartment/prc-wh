@@ -2438,3 +2438,59 @@ for verification. And the hidden pane's stale-style problem bit again — a hove
 reported `fill-opacity: 0` while its class list already had `is-hover`. Read the class
 list, or re-read after a real load; do not trust a computed colour taken right after a
 class change.
+
+### 2026-09-07 — Session: "can't open the GitHub page" — site verified healthy end to end
+
+No fault found on our side. Recording the checks so the next report of this can be
+answered in one pass instead of re-derived, and adding the one tool that was missing.
+
+**What was checked, and what it returned.**
+
+| Check | Result |
+|---|---|
+| `https://prcdepartment.github.io/prc-wh/` | **200**, correct `index.html` |
+| Main JS / CSS / favicon | **200** — 935,666 B, 86,130 B, 1,287 B |
+| Actions runs (public API, last 4) | **all `success`**, newest on `5df0ca3` = current `HEAD` |
+| Supabase `/auth/v1/health` | **200**, GoTrue v2.196.0 — the project is NOT paused |
+| Supabase `/rest/v1/inventory` | **200** |
+| Supabase URL + publishable key inlined in the deployed bundle | **both present** (`isConfigured` true) |
+| Production bundle rendered | login page, **zero console errors** |
+
+The deployed main bundle is `index-BBw1Noll.js`, and rebuilding from `HEAD` locally
+produced **the same hash** — so what is live is exactly this commit, not a stale deploy.
+That build was then served through `vite preview` under its real `/prc-wh/` base and
+loaded: it routes to `/prc-wh/login`, renders the sign-in card and the hero, shows the
+new "Engineering a First-World Philippines" line, correctly omits the demo quick-sign-in
+panel, and logs nothing to the console. The hero's three figures are absent, which is
+correct — they hide when there are no items, and there is no session in a preview.
+
+**The likely causes are all client-side, and one is much more likely than the rest.**
+
+The old address **`ljrondina.github.io/Warehouse-Management/` does not resolve at all** —
+`HTTP 000`, a connection failure rather than a 404. GitHub redirects a renamed or
+transferred *repository*, but it does **not** redirect the Pages *site*, so every
+bookmark, chat link and browser autocomplete entry from before the 2026-08-16 move is
+dead in a way that looks exactly like "the site is down". This is the first thing to ask
+about.
+
+Second: `prcdepartment.github.io/` on its own is a 404 — the repo path is required.
+`prcdepartment.github.io/prc-wh` (no trailing slash) is fine; it 301s to the slash.
+
+Third, worth knowing about but not diagnosed here: a deep link like `/prc-wh/login`
+returns an HTTP **404 status** whose *body* is the SPA shim that bounces to
+`index.html`. A browser runs the shim and lands correctly, but a corporate proxy or
+security appliance that substitutes its own page on a 404 response would break deep
+links while leaving the root working. Combined with enterprise filtering of `*.github.io`
+generally, that is the other plausible failure mode on a Megawide-managed network — and
+neither can be seen from here.
+
+**Added: a `wms-preview` launch configuration** (`.claude/launch.json`) running
+`vite preview` on port 4173. `npm run dev` serves from source at the root path and
+therefore cannot answer "is the *deployed* build broken"; this one serves `dist/` under
+the real `/prc-wh/` base, which is what made the render check above possible. Worth
+reaching for whenever production behaves differently from dev.
+
+**Standing note for this class of report:** GitHub Pages returning 200 with correct
+assets, a green workflow on the current SHA, and a live Supabase health check together
+rule out everything we control. Past that point the useful questions are which URL was
+used and from which network.

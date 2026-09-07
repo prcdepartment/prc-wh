@@ -2494,3 +2494,46 @@ reaching for whenever production behaves differently from dev.
 assets, a green workflow on the current SHA, and a live Supabase health check together
 rule out everything we control. Past that point the useful questions are which URL was
 used and from which network.
+
+### 2026-09-07 — Correction to the entry above: the repo advertises a dead URL
+
+The stale-bookmark theory in the previous entry was **wrong**, and the user said so:
+the site opened fine for them after the 16 August move, which means they were already
+on the new address. Recording the correction and the real finding.
+
+**`prcdepartment/prc-wh` has its `homepage` field set to
+`https://prc-department.github.io/prc-wh/` — with a hyphen.** The organisation is
+`prcdepartment`, unhyphenated, so that host is a different account that does not exist.
+GitHub renders `homepage` as the website link in the repository's **About** sidebar,
+which is the most obvious thing on the page to click.
+
+```
+https://prc-department.github.io/prc-wh/   ->  404  "Site not found · GitHub Pages"
+https://prcdepartment.github.io/prc-wh/    ->  200  the app
+```
+
+Every `*.github.io` name resolves to GitHub's own servers (185.199.108–111.153), so the
+hyphenated address does not fail to connect — it returns GitHub's **"There isn't a
+GitHub Pages site here"** page. That is indistinguishable, to anyone who is not reading
+the address bar closely, from the site having been taken down. It also explains a
+failure that arrives without anything having been deployed, because repository metadata
+is not part of any build.
+
+**Fix, and it is not something this tooling should do unasked:** repository → About →
+the gear icon → Website. Either correct the spelling to `prcdepartment` or tick "Use
+your GitHub Pages website", which fills it from the live Pages deployment and cannot
+then drift. It is repo metadata, so no commit, no deploy, nothing in this codebase
+changes.
+
+**Everything checked in the entry above still stands** — Pages 200, assets 200, four
+green runs on the current SHA, Supabase healthy, the deployed bundle byte-identical to
+a local rebuild of `HEAD` and rendering with zero console errors. GitHub itself also
+reports all systems operational and the `*.github.io` certificate is valid to
+31 October 2026. So the infrastructure was never the problem; the signpost was.
+
+**Method note worth keeping.** The first pass checked whether the *site* was healthy and
+concluded it was, then reached for a guess about the user's browser. The finding came
+from reading the repository's own metadata (`/repos/{owner}/{repo}` in the API), which
+is a surface neither the deployment nor the codebase covers. When a working system is
+reported broken, check what *points at* it, not only what serves it — the About link,
+the Pages settings URL, and anything else that hands somebody an address.

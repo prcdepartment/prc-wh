@@ -32,9 +32,9 @@ Montserrat / Barlow Condensed, light + dark mode.
 ## Data architecture (Phase 2, 2026-08-16)
 
 **Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
-`inventory` (827), `ledger` (214), `safekeeping_soh` (178), `safekeeping_incoming` (372),
-`safekeeping_outgoing` (262), `delivery_tracker` (27). Read by all signed-in users;
-**only admins write**. Counts are the 2026-09-02 snapshot — they change with every
+`inventory` (827), `ledger` (295), `safekeeping_soh` (189), `safekeeping_incoming` (305),
+`safekeeping_outgoing` (287), `delivery_tracker` (27). Read by all signed-in users;
+**only admins write**. Counts are the 2026-09-07 snapshot — they change with every
 import, so treat them as "roughly this size", not as a contract.
 
 **Empty transactional tables** — `movements`, `reservations`, `purchase_requests`,
@@ -2537,3 +2537,85 @@ from reading the repository's own metadata (`/repos/{owner}/{repo}` in the API),
 is a surface neither the deployment nor the codebase covers. When a working system is
 reported broken, check what *points at* it, not only what serves it — the About link,
 the Pages settings URL, and anything else that hands somebody an address.
+
+### 2026-09-07 — Session: 2026-09-07 snapshot; the importer now reads both workbook layouts
+
+`sample/MCC. PRC. WM. CW Taytay Inventory. 2026 09 07.xlsx`. This was supposed to be the
+one-command loop the last session built. It was not, because the workbook changed shape
+again — the third distinct shape in three snapshots — so the script now **detects** the
+layout instead of assuming one.
+
+**What changed, and it went backwards.** 2026-09-02 merged warehouse and safekeeping into
+a single `SOH` / `Incoming` / `Outgoing` set split by Project Origin. 2026-09-07 returns to
+the July arrangement: `CW SOH` / `CW Incoming` / `CW Outgoing` beside
+`Safekeeping SOH` / `Safekeeping Incoming` / `Safekeeping Outgoing`. **The columns are
+identical in both**; only the division moved. `SPLIT = has('CW SOH')` picks the branch, both
+reduce to the same six row sets, and everything downstream is layout-blind.
+
+**The subtle part: which signal divides them is not the same in the two shapes.** In the
+merged workbook Project Origin is the only signal available. In the split workbook the
+SHEET is authoritative and Project Origin is merely provenance. Carrying the 09-02 rule
+across would have misfiled 60 rows:
+
+- `CW Incoming` holds **53 rows whose origin is a project** — a site transferring a concrete
+  rack, rockwool, concrete pedestals INTO warehouse ownership. Real warehouse receipts.
+- `Safekeeping Outgoing` holds **7 rows whose origin is the warehouse**, every one remarked
+  "Pullout of safekeeping materials".
+
+Checked by reading the rows rather than assuming, because the two sheets disagree with the
+origin column in opposite directions and the wrong rule fails silently.
+
+**That fixes the worst limitation of the 09-02 import.** Warehouse receipts were 1 row of
+373 there, so Activity reported a single receipt worth ₱0. Now the ledger carries **295 rows,
+77 in / 218 out**, and Activity reads **9,021 received · ₱1,823,157** against 31,810 issued.
+
+**The location sheet is gone again.** 09-02's `Item per location bin` is not in this file.
+Locations are therefore **carried forward** from the previous snapshot, the same way price
+and condition class already are: a pallet does not move because a tab was left out of one
+export, and discarding 787 real bin addresses would quietly return the floor plan to
+guessing. `HAS_LOCATION_SHEET` gates it, the generated header says so, and the import report
+prints `location (CARRIED)` with an explicit two-line warning rather than the usual
+`recorded location`. Coverage is **787 of 827 (95%)** — higher than 09-02's own 754, because
+the carry-forward falls back to item-code matching where the description text changed.
+
+**Reader fix, and this file is why.** Two sheets declare **1,048,147** and **1,048,575** rows
+while holding 78 and 306 of data — somebody formatted them to the bottom, which is most of
+why this workbook is **19 MB against the previous 435 KB**. `rows()` now trims trailing
+empty rows before densifying; without it every read allocated a million arrays per sheet.
+
+**Other reading changes.** The moving class moved to a new trailing column, so it reads the
+later one and falls back to the earlier. Two new project names appear with no code in the
+master — *Carbon Market - Block 2*, *Urban Deca Ortigas* — bringing the unmatched list to 8
+of 11; `projectCode` stays blank rather than guessing, as before.
+
+**The seed's prune became load-bearing for the first time.** `safekeeping_incoming` fell
+**372 → 305**, so `delete from public.safekeeping_incoming where id > 305` removes 67 rows
+that would otherwise have survived the upsert as stock that no longer exists. That guard was
+added on 09-02 against exactly this month and had nothing to do until now.
+
+**Figures.** inventory 827 (unchanged count, different lines), ledger 295, safekeeping_soh
+189, sk_incoming 305, sk_outgoing 287. Valuation **₱104,523,359** against ₱105,212,151 — down
+0.7%. Units on hand 496,096 (was 498,728). 50 lines unpriced, 7 without a condition class —
+both identical to last month, so nothing new went unpriced. `TODAY` moved to **2026-09-07**,
+which is also the newest movement plus three days.
+
+**Verified.** The generated-data suite and the esbuild/Node placement suite both pass:
+`totalQty === available + reserved` and `=== beginning + in - out` on all 827 lines (the
+source sheet was itself consistent on all 1,016 stock rows across both SOH sheets), every
+recorded line at its recorded bay, 0 collisions between modelled and recorded, capacity never
+over positions. In the browser on the real data: dashboard 496,096 with 483,932 + 12,164
+reconciling exactly, Reports ₱104,523,359 over 827 SKUs, Analytics 168 ledger days with the
+newest movement 3 days ago, Safekeeping 11 projects / 281,665 SOH / 180,071 in / 79,996 out,
+the MEPFS panel reading "394 of 396 lines are at their recorded bin", and zero console errors.
+`npm run build` passes and `dist/` holds no item code, description, location or figure.
+
+**The Incoming tile still reads 0, and that is correct.** It is a trailing-14-day in-transit
+slice, and the newest warehouse receipt is 2026-08-14 — 24 days before the snapshot. The
+receipts are real and visible in Activity; nothing has arrived in the last fortnight.
+
+**To put this live** (Supabase SQL Editor, in order): paste `supabase/seed/01..04_seed.sql`.
+**No migration this time** — `location` and `bin_count` were added on 09-02 and the schema is
+unchanged.
+
+**Still open, unchanged from 09-02:** where the authoritative price list now lives, given no
+workbook since July has carried one.

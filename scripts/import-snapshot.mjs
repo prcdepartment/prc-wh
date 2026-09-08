@@ -5,29 +5,32 @@
 //
 // Then `npm run seed` turns those modules into the SQL that goes into Supabase.
 // Committing this script (it holds no data, only the reading rules) means the next
-// monthly snapshot is one command instead of a hand-built one-off — the previous
-// generator was ad-hoc and was not kept, which is why the September file had to be
-// re-decoded from scratch.
+// snapshot is one command instead of a hand-built one-off — the July generator was
+// ad-hoc and was not kept, which is why the September file had to be re-decoded from
+// scratch. It has since earned that: the workbook has arrived in two different
+// shapes and with two different sets of sheets across three consecutive snapshots.
 //
 // ---------------------------------------------------------------------------
-// WHAT THE SEPTEMBER WORKBOOK CHANGED, AND HOW THIS READS IT
+// WHAT THIS SCRIPT ASSUMES, AND WHAT IT REFUSES TO ASSUME
 //
-// The July workbook kept warehouse-owned stock and project-owned safekeeping stock
-// on separate sheets. The September one merges them and distinguishes the two by
-// "Project Origin": rows reading "Central Warehouse Taytay" are the warehouse's own
-// material, everything else is a project's material being held. That ONE rule
-// partitions all three sheets (SOH, Incoming, Outgoing) consistently, so a line's
-// stock and its movement can never land on opposite sides of the split.
+// STABLE across every snapshot so far: the COLUMN order of the stock sheets
+// (Concatenate, Project Origin, Item Code, Item Description, Specific Description,
+// Uom, BOH, In, Out, SOH, …) and of the movement sheets (…, Date, Document
+// Reference, Category, Item Code, Item Description, 2nd Description, Uom, Qty, Class,
+// Condition, Remarks). Everything here is keyed off those positions.
 //
-// It also drops four columns the July sheet carried — Item Group, Trades, Unit Price
-// and Total Value — and adds a hidden "Item per location bin" sheet giving each line
-// a real rack address. So:
+// NOT STABLE, and therefore detected per file rather than assumed:
+//   * whether warehouse and safekeeping are on SEPARATE sheets or merged into one
+//     and split by Project Origin — see the layout note below;
+//   * whether a location sheet is present at all. 2026-09-02 had one; the July and
+//     2026-09-07 files do not.
 //
-//   * trade and item group now come from the item master (7,378 codes, which covers
-//     every code in the sheet) instead of the sheet's own charge codes;
-//   * unit price is carried forward from the previous snapshot. The location sheet
-//     HAS a Price column and it is not usable — see PRICE below;
-//   * storage location is now READ, not modelled, for the lines the sheet places.
+// NEVER IN THE WORKBOOK, so sourced elsewhere every time:
+//   * trade and item group — from the item master, which resolves every code the
+//     sheets carry and is a better taxonomy than the sheet's own charge codes;
+//   * unit price and condition class — carried forward from the previous snapshot.
+//     A price column has appeared once, on the 2026-09-02 location sheet, and it was
+//     unusable — see PRICE below.
 // ---------------------------------------------------------------------------
 import { writeFileSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -75,34 +78,81 @@ const round2 = (n) => Math.round(n * 100) / 100
 // Read the workbook
 // ---------------------------------------------------------------------------
 const wb = readWorkbook(srcPath)
+const has = (name) => wb.sheetNames.includes(name)
 const sheet = (name) => wb.rows(name)
 
-// SOH: row 1 is "As of: <date>", row 2 the header, data from row 3.
-const sohRaw = sheet('SOH')
-const SNAPSHOT_DATE = (() => {
-  const v = cell(sohRaw[0]?.[2])
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v
-  throw new Error('SOH!C1 does not hold the snapshot date')
-})()
+// ---------------------------------------------------------------------------
+// TWO LAYOUTS, AND WHY BOTH HAVE TO BE READ
+//
+// The warehouse has now sent this workbook in two shapes in as many months, so the
+// layout is detected rather than assumed:
+//
+//   SPLIT  (July, and again 2026-09-07) — "CW SOH" / "CW Incoming" / "CW Outgoing"
+//          beside "Safekeeping SOH" / "Safekeeping Incoming" / "Safekeeping Outgoing".
+//   MERGED (2026-09-02) — one "SOH" / "Incoming" / "Outgoing", warehouse and
+//          safekeeping distinguished only by the Project Origin column.
+//
+// The COLUMNS are identical in both; only the division differs. Both are reduced to
+// the same six row sets here, and everything downstream is layout-blind.
+//
+// WHICH SIGNAL DIVIDES THEM MATTERS, and the answer is not the same in each shape.
+// In the merged workbook Project Origin is the only signal there is. In the split
+// workbook the SHEET is authoritative and Project Origin is merely provenance —
+// "CW Incoming" holds 53 rows whose origin is a project, and they are real warehouse
+// receipts (a site transferring a concrete rack or rockwool INTO warehouse ownership),
+// while "Safekeeping Outgoing" holds 7 rows whose origin is the warehouse and every
+// one is a safekeeping pull-out. Partitioning the split workbook by Project Origin
+// would therefore misfile all 60 of them. The warehouse's own filing is the fact;
+// the origin column is where the material came from, not who owns it now.
+// ---------------------------------------------------------------------------
+const SPLIT = has('CW SOH')
 
-const SOH = sohRaw.slice(2)
-  .filter((r) => clean(r[2]))
-  .map((r) => ({
-    origin: clean(r[1]), code: clean(r[2]), desc: clean(r[3]), desc2: clean(r[4]), uom: clean(r[5]),
-    boh: num(r[6]), qin: num(r[7]), qout: num(r[8]), soh: num(r[9]),
-    remarks: clean(r[14]), moving: clean(r[20]),
-  }))
+// SOH sheets: row 1 is "As of: <date>", row 2 the header, data from row 3.
+const sohRows = (name) =>
+  sheet(name).slice(2)
+    .filter((r) => clean(r[2]))
+    .map((r) => ({
+      origin: clean(r[1]), code: clean(r[2]), desc: clean(r[3]), desc2: clean(r[4]), uom: clean(r[5]),
+      boh: num(r[6]), qin: num(r[7]), qout: num(r[8]), soh: num(r[9]),
+      // The moving class sits in one of two trailing columns depending on the export;
+      // the later one is better populated, so prefer it and fall back.
+      remarks: clean(r[14]), moving: clean(r[21]) || clean(r[20]),
+    }))
 
-const movementRows = (name, dateCol) =>
+const movementRows = (name) =>
   sheet(name).slice(1)
     .filter((r) => clean(r[1]))
     .map((r) => ({
-      origin: clean(r[1]), dest: clean(r[2]), date: clean(r[dateCol]), docRef: clean(r[4]),
+      origin: clean(r[1]), dest: clean(r[2]), date: clean(r[3]), docRef: clean(r[4]),
       category: clean(r[5]), code: clean(r[6]), desc: clean(r[7]), desc2: clean(r[8]),
       uom: clean(r[9]), qty: num(r[10]), cls: clean(r[11]), cond: clean(r[12]), remarks: clean(r[13]),
     }))
-const INCOMING = movementRows('Incoming', 3)
-const OUTGOING = movementRows('Outgoing', 3)
+
+const SNAPSHOT_DATE = (() => {
+  const v = cell(sheet(SPLIT ? 'CW SOH' : 'SOH')[0]?.[2])
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v
+  throw new Error('the SOH sheet\'s C1 cell does not hold the snapshot date')
+})()
+
+let warehouseRows, skStock, CW_IN, CW_OUT, SK_IN, SK_OUT
+if (SPLIT) {
+  warehouseRows = sohRows('CW SOH')
+  skStock = sohRows('Safekeeping SOH')
+  CW_IN = movementRows('CW Incoming')
+  CW_OUT = movementRows('CW Outgoing')
+  SK_IN = movementRows('Safekeeping Incoming')
+  SK_OUT = movementRows('Safekeeping Outgoing')
+} else {
+  const SOH = sohRows('SOH')
+  warehouseRows = SOH.filter((r) => r.origin === WAREHOUSE)
+  skStock = SOH.filter((r) => r.origin !== WAREHOUSE)
+  const INCOMING = movementRows('Incoming')
+  const OUTGOING = movementRows('Outgoing')
+  CW_IN = INCOMING.filter((r) => r.origin === WAREHOUSE)
+  CW_OUT = OUTGOING.filter((r) => r.origin === WAREHOUSE)
+  SK_IN = INCOMING.filter((r) => r.origin !== WAREHOUSE)
+  SK_OUT = OUTGOING.filter((r) => r.origin !== WAREHOUSE)
+}
 
 // ---------------------------------------------------------------------------
 // LOCATIONS — the genuinely new thing in this workbook.
@@ -133,14 +183,24 @@ const parseLocation = (raw) => {
   }
 }
 
+// The location sheet is NOT in every export — the 2026-09-07 workbook dropped it
+// again. Where it is absent the addresses are carried forward from the previous
+// snapshot rather than discarded (see LOCATION_CARRIED below): a pallet does not
+// move because a spreadsheet tab was left out of this week's file, and throwing 787
+// real bin addresses away would silently return the floor plan to guessing.
+const HAS_LOCATION_SHEET = has('Item per location bin')
+const LOCATION_CARRIED = !HAS_LOCATION_SHEET
+
 const locBins = new Map() // project|code|desc2 -> [parsed location, ...]
-for (const r of sheet('Item per location bin').slice(1)) {
-  const loc = parseLocation(clean(r[9]))
-  if (!loc) continue
-  const key = `${clean(r[1])}|${clean(r[2])}|${clean(r[4]).toUpperCase()}`
-  if (!locBins.has(key)) locBins.set(key, [])
-  const list = locBins.get(key)
-  if (!list.some((l) => l.raw === loc.raw)) list.push(loc)
+if (HAS_LOCATION_SHEET) {
+  for (const r of sheet('Item per location bin').slice(1)) {
+    const loc = parseLocation(clean(r[9]))
+    if (!loc) continue
+    const key = `${clean(r[1])}|${clean(r[2])}|${clean(r[4]).toUpperCase()}`
+    if (!locBins.has(key)) locBins.set(key, [])
+    const list = locBins.get(key)
+    if (!list.some((l) => l.raw === loc.raw)) list.push(loc)
+  }
 }
 // A line spread over several bays is stored in reading order, so the "primary" bin
 // is the lowest-numbered one rather than whichever row the sheet happened to list first.
@@ -188,6 +248,7 @@ const prevSk = await load('safekeepingSheets.js').then((m) => m.SOH_ROWS).catch(
 const key2 = (code, desc2) => `${code}|${String(desc2 || '').toUpperCase()}`
 const priceByKey = new Map(), priceByCode = new Map()
 const classByKey = new Map(), classByCode = new Map()
+const locByKey = new Map(), locByCode = new Map()
 for (const r of prevInventory) {
   if (r.unitPrice > 0) {
     priceByKey.set(key2(r.itemCode, r.detailedDescription), r.unitPrice)
@@ -196,6 +257,11 @@ for (const r of prevInventory) {
   if (r.conditionClass) {
     classByKey.set(key2(r.itemCode, r.detailedDescription), r.conditionClass)
     if (!classByCode.has(r.itemCode)) classByCode.set(r.itemCode, r.conditionClass)
+  }
+  // Only consulted when this workbook carries no location sheet of its own.
+  if (r.location) {
+    locByKey.set(key2(r.itemCode, r.detailedDescription), { raw: r.location, count: r.binCount || 1 })
+    if (!locByCode.has(r.itemCode)) locByCode.set(r.itemCode, { raw: r.location, count: r.binCount || 1 })
   }
 }
 for (const r of prevSk) {
@@ -206,7 +272,7 @@ for (const r of prevSk) {
 // This workbook's own movement rows carry a class per item code — a second source for
 // codes the previous snapshot never held.
 const classFromMovement = new Map()
-for (const r of [...INCOMING, ...OUTGOING]) {
+for (const r of [...CW_IN, ...CW_OUT, ...SK_IN, ...SK_OUT]) {
   const c = r.cls.toUpperCase()
   if (r.code && /^[ABC]$/.test(c) && !classFromMovement.has(r.code)) classFromMovement.set(r.code, c)
 }
@@ -257,7 +323,6 @@ const offsetOf = (iso) => {
 
 const ledgerFrom = (rows, dir) =>
   rows
-    .filter((r) => r.origin === WAREHOUSE)
     .map((r) => ({ r, off: offsetOf(r.date) }))
     // Undated rows are dropped rather than parked on an invented day, which would put
     // volume the warehouse never moved into whichever bucket the guess landed in.
@@ -268,11 +333,10 @@ const ledgerFrom = (rows, dir) =>
       cls: r.cls.toUpperCase(), cond: r.cond ? r.cond[0].toUpperCase() + r.cond.slice(1).toLowerCase() : '',
     }))
 
-const LEDGER = [...ledgerFrom(INCOMING, 'in'), ...ledgerFrom(OUTGOING, 'out')]
+const LEDGER = [...ledgerFrom(CW_IN, 'in'), ...ledgerFrom(CW_OUT, 'out')]
   .sort((a, b) => b.off - a.off)
 
-const droppedLedger =
-  [...INCOMING, ...OUTGOING].filter((r) => r.origin === WAREHOUSE).length - LEDGER.length
+const droppedLedger = CW_IN.length + CW_OUT.length - LEDGER.length
 
 // Per-code movement facts, used to fill the stock rows below.
 const ledgerByCode = new Map()
@@ -287,7 +351,6 @@ for (const r of LEDGER) {
 // ---------------------------------------------------------------------------
 const IN_TRANSIT_WINDOW = 14 // days; matches the previous snapshot's definition
 
-const warehouseRows = SOH.filter((r) => r.origin === WAREHOUSE)
 const inventory = warehouseRows.map((r, i) => {
   const m = master.get(r.code)
   const rnd = seeded(`${r.code}|${r.desc2}|${r.soh}`)
@@ -322,8 +385,19 @@ const inventory = warehouseRows.map((r, i) => {
   else lastMovementOffset = 120 + Math.floor(rnd() * 245)
 
   const unitPrice = priceFor(r.code, r.desc2)
+
+  // Location: this workbook's own sheet where it has one, otherwise the address the
+  // previous snapshot recorded for the same line.
   const bins = locBins.get(`${WAREHOUSE}|${r.code}|${r.desc2.toUpperCase()}`) ?? []
-  const primary = bins[0] ?? null
+  let primary = bins[0] ?? null
+  let binCount = bins.length
+  if (!primary) {
+    const carried = locByKey.get(key2(r.code, r.desc2)) ?? locByCode.get(r.code)
+    if (carried) {
+      primary = parseLocation(carried.raw)
+      binCount = carried.count
+    }
+  }
 
   return {
     id: i + 1,
@@ -355,7 +429,7 @@ const inventory = warehouseRows.map((r, i) => {
     // as written; zone/rack/shelf/bin are its parts, kept because the schema and the
     // material profile already read those names.
     location: primary?.raw ?? '',
-    binCount: bins.length,
+    binCount: primary ? binCount || 1 : 0,
     zone: primary?.area ?? '',
     rack: primary?.rack ?? '',
     shelf: primary?.level ? String(primary.level).padStart(2, '0') : '',
@@ -369,7 +443,6 @@ const inventory = warehouseRows.map((r, i) => {
 // ---------------------------------------------------------------------------
 // SAFEKEEPING — project-owned material held at the warehouse
 // ---------------------------------------------------------------------------
-const skStock = SOH.filter((r) => r.origin !== WAREHOUSE)
 const SOH_ROWS = skStock.map((r, i) => {
   const m = master.get(r.code)
   return {
@@ -396,8 +469,8 @@ const SOH_ROWS = skStock.map((r, i) => {
   }
 })
 
-const skLog = (rows, i0) =>
-  rows.filter((r) => r.origin !== WAREHOUSE).map((r, i) => ({
+const skLog = (rows) =>
+  rows.map((r, i) => ({
     id: i + 1,
     project: r.origin,
     projectCode: projectCodeFor(r.origin),
@@ -413,8 +486,8 @@ const skLog = (rows, i0) =>
     condition: r.cond ? r.cond[0].toUpperCase() + r.cond.slice(1).toLowerCase() : '',
     remarks: r.remarks,
   }))
-const INCOMING_ROWS = skLog(INCOMING)
-const OUTGOING_ROWS = skLog(OUTGOING)
+const INCOMING_ROWS = skLog(SK_IN)
+const OUTGOING_ROWS = skLog(SK_OUT)
 
 // ---------------------------------------------------------------------------
 // Write the modules
@@ -428,18 +501,22 @@ ${extra}`
 
 const jsonLines = (rows) => rows.map((r) => `  ${JSON.stringify(r)}`).join(',\n')
 
-writeFileSync(priv('inventory.js'), `${banner(`// Sheet "SOH", the ${warehouseRows.length} rows whose Project Origin is the warehouse
-// itself. Snapshot ${SNAPSHOT_DATE}.
+writeFileSync(priv('inventory.js'), `${banner(`// Warehouse-owned stock: ${warehouseRows.length} lines from ${SPLIT ? 'sheet "CW SOH"' : 'the rows of sheet "SOH" whose Project Origin is the warehouse'}.
+// Snapshot ${SNAPSHOT_DATE}.
 //
-// STRAIGHT FROM THE SHEET: item code, both descriptions, UOM, BOH / In / Out / SOH,
-// and — new in this workbook — the rack address, read from the "Item per location
-// bin" sheet for the ${inventory.filter((r) => r.location).length} lines it places.
+// STRAIGHT FROM THE SHEET: item code, both descriptions, UOM, BOH / In / Out / SOH.
 //
-// FROM THE ITEM MASTER: trade, item group and material type. The September sheet
-// dropped its own Item Group and Trades columns; the master covers every code here.
+// FROM THE ITEM MASTER: trade, item group and material type. The sheet carries no
+// Item Group or Trades column; the master resolves every code here.
 //
 // CARRIED FORWARD from the previous snapshot: unit price and condition class, which
-// this workbook does not carry. ${inventory.filter((r) => !r.unitPrice).length} lines could not be priced and sit at zero.
+// no sheet in this workbook carries. ${inventory.filter((r) => !r.unitPrice).length} lines could not be priced and sit at zero.
+//
+// STORAGE LOCATION on ${inventory.filter((r) => r.location).length} of them, ${LOCATION_CARRIED
+  ? `CARRIED FORWARD from the previous snapshot — this workbook has no
+// "Item per location bin" sheet, and a bin address does not stop being true because
+// a tab was left out of one export. Lines new since then have none.`
+  : `read from this workbook's own "Item per location bin" sheet.`}
 //
 // SYNTHESIZED, deterministically and stably per line: reserved, available, damaged,
 // min level, and — for lines the ledger does not reach — last movement. Brand is read
@@ -457,9 +534,9 @@ ${jsonLines(inventory)}
 ];
 `, 'utf8')
 
-writeFileSync(priv('ledger.js'), `${banner(`// Sheets "Incoming" and "Outgoing", restricted to rows whose Project Origin is the
-// warehouse itself — this is the warehouse's OWN movement, the same partition the
-// stock rows use. Project-owned movement is in safekeepingSheets.js instead.
+writeFileSync(priv('ledger.js'), `${banner(`// The warehouse's OWN movement, from ${SPLIT ? 'sheets "CW Incoming" and "CW Outgoing"' : 'the rows of "Incoming" / "Outgoing" whose Project Origin is the warehouse'}.
+// Project-owned movement is in safekeepingSheets.js instead — the same division the
+// stock rows use, so a line's stock and its movement never land on opposite sides.
 //
 // \`off\` is days before the snapshot date (${SNAPSHOT_DATE}), the same base as
 // lastMovementOffset in inventory.js, so 0 is the most recent movement on record.
@@ -469,16 +546,16 @@ writeFileSync(priv('ledger.js'), `${banner(`// Sheets "Incoming" and "Outgoing",
 //   cls = condition class, cond = condition
 //
 // ${droppedLedger} warehouse row(s) carry no usable date and are omitted rather than parked on
-// an invented day. Note the workbook records almost no warehouse-owned RECEIPTS
-// (${LEDGER.filter((r) => r.dir === 'in').length} of ${LEDGER.length} rows are incoming): the Incoming sheet is nearly all project
-// material arriving for safekeeping, so the incoming series is genuinely sparse.`)}
+// an invented day. In: ${LEDGER.filter((r) => r.dir === 'in').length}, out: ${LEDGER.filter((r) => r.dir === 'out').length}.`)}
 export const LEDGER = [
 ${jsonLines(LEDGER)}
 ];
 `, 'utf8')
 
-writeFileSync(priv('safekeepingSheets.js'), `${banner(`// Project-owned material held at the warehouse: every row of "SOH", "Incoming" and
-// "Outgoing" whose Project Origin is NOT the warehouse itself. Snapshot ${SNAPSHOT_DATE}.
+writeFileSync(priv('safekeepingSheets.js'), `${banner(`// Project-owned material held at the warehouse, from ${SPLIT
+  ? 'the three "Safekeeping …" sheets'
+  : 'the rows of "SOH" / "Incoming" / "Outgoing" whose Project Origin is not the warehouse'}.
+// Snapshot ${SNAPSHOT_DATE}.
 //   SOH ${SOH_ROWS.length} rows, Incoming ${INCOMING_ROWS.length}, Outgoing ${OUTGOING_ROWS.length}.
 //
 // Caveats kept rather than papered over:
@@ -522,8 +599,12 @@ console.log(`  safekeeping_outgoing ${String(OUTGOING_ROWS.length).padStart(5)} 
 console.log(`\n  valuation            ${money(val)}   (previous snapshot ${money(prevVal)})`)
 console.log(`  unpriced lines       ${inventory.filter((r) => !r.unitPrice).length}  holding ${inventory.filter((r) => !r.unitPrice).reduce((a, r) => a + r.totalQty, 0).toLocaleString()} units`)
 console.log(`  no condition class   ${inventory.filter((r) => !r.conditionClass).length}`)
-console.log(`  recorded location    ${placed} of ${inventory.length} (${Math.round(placed / inventory.length * 100)}%), ` +
+console.log(`  ${LOCATION_CARRIED ? 'location (CARRIED)' : 'recorded location  '}  ${placed} of ${inventory.length} (${Math.round(placed / inventory.length * 100)}%), ` +
   `${inventory.filter((r) => r.binCount > 1).length} spread over several bays`)
+if (LOCATION_CARRIED) {
+  console.log(`                       ^ this workbook has NO "Item per location bin" sheet;`)
+  console.log(`                         the addresses above are the previous snapshot's.`)
+}
 console.log(`  units on hand        ${inventory.reduce((a, r) => a + r.totalQty, 0).toLocaleString()}`)
 
 const byArea = new Map()

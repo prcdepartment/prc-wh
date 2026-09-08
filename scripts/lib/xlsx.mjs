@@ -185,12 +185,24 @@ export function readWorkbook(file) {
       }
       out[rIdx] = row
     }
+    // Trim trailing rows that carry no value. Excel records a <row> for anything it
+    // has ever styled, so a sheet somebody formatted to the bottom reports 1,048,576
+    // rows holding 78 of data — the 2026-09-07 workbook does exactly that on two
+    // sheets, which is most of why that file is 19 MB against the previous 435 KB.
+    // Densifying to the declared height would allocate a million arrays per sheet.
+    let end = out.length
+    while (end > 0) {
+      const r = out[end - 1]
+      if (r && r.some((v) => v !== null && v !== undefined && v !== '')) break
+      end--
+    }
+
     // Fill holes so callers can index without guarding. A sheet with blank rows
     // leaves gaps in both dimensions, and Array#map preserves holes, so this
     // rebuilds a dense rectangle rather than mapping over the sparse one.
     const width = out.reduce((w, r) => Math.max(w, r ? r.length : 0), 0)
     const dense = []
-    for (let i = 0; i < out.length; i++) {
+    for (let i = 0; i < end; i++) {
       const filled = out[i] ?? []
       for (let j = 0; j < width; j++) if (filled[j] === undefined) filled[j] = null
       dense.push(filled)

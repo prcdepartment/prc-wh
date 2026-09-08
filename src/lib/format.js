@@ -19,7 +19,7 @@ export const pct = (n) => `${(n || 0).toFixed(1)}%`
 // workbook's own "As of" date, which is also its latest recorded release, so no
 // movement on record ever lands on a future date.
 // Update this whenever a new snapshot is imported (npm run import).
-export const TODAY = new Date('2026-09-02T00:00:00')
+export const TODAY = new Date('2026-09-07T00:00:00')
 
 // 'YYYY-MM-DD' from a Date's LOCAL parts, for date-input values. Not
 // toISOString().slice(0,10) — that converts to UTC first, so a local-midnight date in any

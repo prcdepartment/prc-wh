@@ -1035,7 +1035,7 @@ export const DB = {
           "name": "item_code",
           "type": "text",
           "pk": false,
-          "notNull": true,
+          "notNull": false,
           "unique": false,
           "identity": false,
           "default": null,

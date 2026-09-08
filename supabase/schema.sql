@@ -187,7 +187,13 @@ create table if not exists public.ledger (
   id         bigint generated always as identity primary key,
   direction  text not null check (direction in ('in','out')),
   day_offset int not null,
-  item_code  text not null,
+  -- Nullable, like every other movement table here. The warehouse books some
+  -- project-to-warehouse transfers against a description with no item code at all
+  -- (13 of 295 rows in the 2026-09-07 snapshot). Recording the movement without a
+  -- code is honest; dropping the row would understate receipts and inventing a code
+  -- would mis-join to item_master. Only `inventory` keeps `not null` on this column,
+  -- correctly — a stock line with no code cannot be identified.
+  item_code  text,
   description text,
   qty        numeric not null default 0,
   uom        text,

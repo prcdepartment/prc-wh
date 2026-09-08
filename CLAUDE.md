@@ -2619,3 +2619,50 @@ unchanged.
 
 **Still open, unchanged from 09-02:** where the authoritative price list now lives, given no
 workbook since July has carried one.
+
+### 2026-09-07 — Fix: `03_seed.sql` rejected — `ledger.item_code` was NOT NULL
+
+The 2026-09-07 seed failed on paste:
+
+```
+null value in column "item_code" of relation "ledger" violates not-null constraint
+(986, in, 40, null, TURNBUCKLE SHOE, 9, PC, Avesta Residence, AVR101.WSE.GP.379, C, Old)
+```
+
+**That row is real data, and the constraint was the thing that was wrong.** Until this
+snapshot the ledger was built only from movement whose Project Origin was the warehouse,
+and every one of those carried an item code — so `not null` had held by accident rather
+than by design. The 2026-09-07 import correctly widened the ledger to the whole `CW
+Incoming` sheet, which is where the 53 project-to-warehouse transfers live, and **13 of
+those are booked against a description with no item code at all**. They are 2,995 of the
+25,101 units received.
+
+**`ledger.item_code` is now nullable**, matching every sibling: `safekeeping_soh`,
+`safekeeping_incoming`, `safekeeping_outgoing`, `movements`, `reservations`,
+`purchase_requests` and `material_requests` all already declare `item_code text`, and
+safekeeping has been carrying 60 incoming and 26 outgoing codeless rows for months.
+`inventory` keeps `not null`, correctly — a stock line with no code cannot be identified,
+and no source has ever produced one.
+
+The two alternatives were both worse. Dropping the 13 rows understates receipts by 12%.
+Inventing a placeholder code fabricates data and mis-joins to `item_master`.
+
+Checked before changing anything that the app tolerates a null there: every consumer
+reads it as `codes.has(r.c)` or `prices.get(r.c) || 0`, never a string method. The
+consequence is that a codeless row contributes to no PER-ITEM series, which is the same
+treatment the 36 rows whose code no longer holds stock already get; it still counts in
+the movement totals.
+
+**Also added a seed/schema cross-check**, because finding this one constraint at a time
+by pasting is a poor way to learn about them. It parses every `not null` out of
+`schema.sql`, tokenises each generated `insert … values` tuple (quote-aware, so embedded
+commas in descriptions do not split a row), and reports any null landing in a constrained
+column. Run against this seed after the fix: **1,191 constrained rows across 52 insert
+statements, zero violations** — 1,191 being exactly inventory 827 + ledger 295 + trades 50
++ projects 19, the only seeded tables that constrain anything.
+
+**To run:** `supabase/migrations/2026-09-07_ledger_item_code_nullable.sql`, then re-paste
+`03_seed.sql`. Re-pasting is safe and complete: `truncate public.ledger` and both ledger
+inserts are all inside `03`, so the partial load from the failed attempt is cleared by the
+re-run. `01`, `02` and `04` do not need repeating. `npm run model` regenerated (202 columns
+now that the comment landed) and `npm run build` passes.

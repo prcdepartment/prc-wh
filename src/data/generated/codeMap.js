@@ -8,12 +8,12 @@
 
 export const CODE = {
   "generatedFrom": "src/**",
-  "fileCount": 77,
-  "totalLines": 17265,
+  "fileCount": 78,
+  "totalLines": 17387,
   "counts": {
     "entry": 2,
     "component": 17,
-    "floorplan": 7,
+    "floorplan": 8,
     "processflow": 4,
     "context": 4,
     "data": 14,
@@ -167,7 +167,6 @@ export const CODE = {
         "src/components/DataSheet.jsx",
         "src/components/DateTimeField.jsx",
         "src/components/DeliveryTracker.jsx",
-        "src/components/FacilityCapacityGauge.jsx",
         "src/components/FilterSearch.jsx",
         "src/components/InventoryComposition.jsx",
         "src/components/ItemLookup.jsx",
@@ -176,6 +175,7 @@ export const CODE = {
         "src/components/Select.jsx",
         "src/components/Tour.jsx",
         "src/components/charts.jsx",
+        "src/components/floorplan/CapacityCylinder.jsx",
         "src/components/floorplan/LocationPanel.jsx",
         "src/components/processflow/ErdDiagram.jsx",
         "src/components/processflow/FlowDiagram.jsx",
@@ -429,16 +429,14 @@ export const CODE = {
       "path": "src/components/FacilityCapacityGauge.jsx",
       "name": "FacilityCapacityGauge.jsx",
       "kind": "component",
-      "lines": 172,
-      "bytes": 8130,
+      "lines": 59,
+      "bytes": 2427,
       "imports": [
+        "src/components/floorplan/CapacityCylinder.jsx",
         "src/data/warehouseMap.js",
-        "src/lib/format.js",
-        "src/lib/icons.jsx"
+        "src/lib/format.js"
       ],
-      "packages": [
-        "react"
-      ],
+      "packages": [],
       "dbOps": [],
       "lazy": false,
       "importedBy": [
@@ -573,6 +571,8 @@ export const CODE = {
       "dbOps": [],
       "lazy": false,
       "importedBy": [
+        "src/components/floorplan/LocationPanel.jsx",
+        "src/pages/StorageMap.jsx",
         "src/pages/dashboard/InventoryTab.jsx",
         "src/pages/dashboard/SafekeepingTab.jsx"
       ]
@@ -663,12 +663,32 @@ export const CODE = {
       ]
     },
     {
+      "path": "src/components/floorplan/CapacityCylinder.jsx",
+      "name": "CapacityCylinder.jsx",
+      "kind": "floorplan",
+      "lines": 146,
+      "bytes": 6690,
+      "imports": [
+        "src/lib/format.js",
+        "src/lib/icons.jsx"
+      ],
+      "packages": [
+        "react"
+      ],
+      "dbOps": [],
+      "lazy": false,
+      "importedBy": [
+        "src/components/FacilityCapacityGauge.jsx"
+      ]
+    },
+    {
       "path": "src/components/floorplan/LocationPanel.jsx",
       "name": "LocationPanel.jsx",
       "kind": "floorplan",
-      "lines": 111,
-      "bytes": 5374,
+      "lines": 139,
+      "bytes": 6578,
       "imports": [
+        "src/components/MaterialList.jsx",
         "src/data/warehouseMap.js",
         "src/lib/format.js",
         "src/lib/icons.jsx"
@@ -703,8 +723,8 @@ export const CODE = {
       "path": "src/components/floorplan/SitePlan.jsx",
       "name": "SitePlan.jsx",
       "kind": "floorplan",
-      "lines": 121,
-      "bytes": 5164,
+      "lines": 127,
+      "bytes": 5635,
       "imports": [
         "src/components/floorplan/planDefs.jsx",
         "src/components/floorplan/planIdCard.jsx",
@@ -722,8 +742,8 @@ export const CODE = {
       "path": "src/components/floorplan/WarehousePlan.jsx",
       "name": "WarehousePlan.jsx",
       "kind": "floorplan",
-      "lines": 229,
-      "bytes": 11136,
+      "lines": 239,
+      "bytes": 11719,
       "imports": [
         "src/components/floorplan/planDefs.jsx",
         "src/components/floorplan/planIdCard.jsx",
@@ -756,8 +776,8 @@ export const CODE = {
       "path": "src/components/floorplan/planIdCard.jsx",
       "name": "planIdCard.jsx",
       "kind": "floorplan",
-      "lines": 78,
-      "bytes": 3289,
+      "lines": 84,
+      "bytes": 3583,
       "imports": [
         "src/components/floorplan/planText.jsx",
         "src/lib/icons.jsx"
@@ -1362,6 +1382,7 @@ export const CODE = {
         "src/components/Layout.jsx",
         "src/components/MaterialList.jsx",
         "src/components/charts.jsx",
+        "src/components/floorplan/CapacityCylinder.jsx",
         "src/components/floorplan/LocationPanel.jsx",
         "src/data/insights.js",
         "src/data/transactions.js",
@@ -1486,7 +1507,6 @@ export const CODE = {
         "src/components/DataSheet.jsx",
         "src/components/DateTimeField.jsx",
         "src/components/DeliveryTracker.jsx",
-        "src/components/FacilityCapacityGauge.jsx",
         "src/components/FilterSearch.jsx",
         "src/components/InventoryComposition.jsx",
         "src/components/ItemLookup.jsx",
@@ -1495,6 +1515,7 @@ export const CODE = {
         "src/components/NewTransactionMenu.jsx",
         "src/components/Select.jsx",
         "src/components/Tour.jsx",
+        "src/components/floorplan/CapacityCylinder.jsx",
         "src/components/floorplan/LocationPanel.jsx",
         "src/components/floorplan/planIdCard.jsx",
         "src/components/processflow/ErdDiagram.jsx",
@@ -1709,7 +1730,7 @@ export const CODE = {
       "name": "Login.jsx",
       "kind": "page",
       "lines": 126,
-      "bytes": 5284,
+      "bytes": 5287,
       "imports": [
         "src/components/Logo.jsx",
         "src/context/AuthContext.jsx",
@@ -1932,10 +1953,11 @@ export const CODE = {
       "path": "src/pages/StorageMap.jsx",
       "name": "StorageMap.jsx",
       "kind": "page",
-      "lines": 340,
-      "bytes": 14431,
+      "lines": 329,
+      "bytes": 13883,
       "imports": [
         "src/components/FacilityCapacityGauge.jsx",
+        "src/components/MaterialList.jsx",
         "src/components/floorplan/LocationPanel.jsx",
         "src/components/floorplan/RackElevation.jsx",
         "src/components/floorplan/SitePlan.jsx",
@@ -2055,8 +2077,8 @@ export const CODE = {
       "path": "src/styles/floorplan.css",
       "name": "floorplan.css",
       "kind": "style",
-      "lines": 204,
-      "bytes": 11558,
+      "lines": 228,
+      "bytes": 13076,
       "imports": [],
       "packages": [],
       "dbOps": [],
@@ -2069,8 +2091,8 @@ export const CODE = {
       "path": "src/styles/index.css",
       "name": "index.css",
       "kind": "style",
-      "lines": 2293,
-      "bytes": 142618,
+      "lines": 2319,
+      "bytes": 144162,
       "imports": [],
       "packages": [],
       "dbOps": [],

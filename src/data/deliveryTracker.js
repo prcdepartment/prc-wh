@@ -34,14 +34,28 @@ const PROJECT_NAME_BY_CODE = {
 // the procurement team, and carries a `match` keyword the tracker uses to resolve a
 // representative item code from the item master at runtime (the sheet has no code of
 // its own, and codes are not shipped in this public repo — see ItemLookup.jsx).
+//
+// `sk` is the join into the safekeeping sheets, which is what gives a scheduled
+// material its REAL item codes, its beginning-on-hand and its already-recorded
+// deliveries and pullouts. It is a list of description keywords rather than item
+// codes, for the same reason `match` is: no item code is committed to this public
+// repository, so the codes are resolved at runtime from the rows themselves.
+// `skNot` excludes a near-miss the keyword would otherwise sweep in.
+//
+// Two materials resolve to nothing and that is the data, not a bug: no sealant and no
+// wooden door has ever been booked into safekeeping, so both carry a scheduled
+// delivery with no stock history behind it. The splice-sleeve grouts (SS Mortar Grout,
+// GRW MC7-8) are deliberately NOT folded into "Rebar Coupler & Accessories" — they are
+// a separate consumable, and claiming them as coupler stock would overstate it. Fold
+// them in here if procurement says they belong to the same package.
 const MATERIAL_MAP = {
-  'Rebar Coupler & Accessories (Splice Sleeve)': { name: 'Rebar Coupler & Accessories', brand: 'Splice Sleeve', detail: '', match: 'coupler' },
-  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: '', match: 'aluminum panel' },
-  'KITCHEN CABINET': { name: 'Kitchen Cabinet', brand: '', detail: '', match: 'kitchen cabinet' },
-  'KITO SEALANT (Interior)': { name: 'Sealant', brand: 'Kito', detail: 'Interior', match: 'sealant' },
-  'Plumbing Fixtures (Laviya)': { name: 'Plumbing Fixtures', brand: 'Laviya', detail: '', match: 'lavatory' },
-  'WIRING DEVICES (Lonon)': { name: 'Wiring Devices', brand: 'London', detail: '', match: 'convenience outlet' },
-  'Wooden Door (Seyken)': { name: 'Wooden Door', brand: 'Seyken', detail: '', match: 'wooden door' },
+  'Rebar Coupler & Accessories (Splice Sleeve)': { name: 'Rebar Coupler & Accessories', brand: 'Splice Sleeve', detail: '', match: 'coupler', sk: ['splice sleeve'] },
+  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: '', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
+  'KITCHEN CABINET': { name: 'Kitchen Cabinet', brand: '', detail: '', match: 'kitchen cabinet', sk: ['kitchen cabinet'] },
+  'KITO SEALANT (Interior)': { name: 'Sealant', brand: 'Kito', detail: 'Interior', match: 'sealant', sk: ['sealant'] },
+  'Plumbing Fixtures (Laviya)': { name: 'Plumbing Fixtures', brand: 'Laviya', detail: '', match: 'lavatory', sk: ['bidet', 'mirror', 'water closet', 'shower head', 'shower set', 'kitchen sink', 'faucet', 'floor drain'] },
+  'WIRING DEVICES (Lonon)': { name: 'Wiring Devices', brand: 'London', detail: '', match: 'convenience outlet', sk: ['convenience outlet', 'way switch', 'cover plate'] },
+  'Wooden Door (Seyken)': { name: 'Wooden Door', brand: 'Seyken', detail: '', match: 'wooden door', sk: ['wooden door', 'flush door'] },
 }
 
 // Filled in place by rebuildDeliveryRows() so consumers keep a live reference
@@ -57,10 +71,17 @@ export function rebuildDeliveryRows() {
         ...r,
         trade: TRADE_BY_CATEGORY[r.category] || r.category,
         project: PROJECT_NAME_BY_CODE[r.project] || r.project,
+        // The sheet's own short code is KEPT alongside the proper name: the Gantt joins
+        // this schedule to the safekeeping sheets, whose project names are written
+        // loosely ('Jab Residences' vs '4PH Jab Greenwoods Dasmariñas'), and the code is
+        // the only stable key both sides share. See SK_PROJECT_KEY in deliveryGantt.js.
+        projectCode: r.project,
         materialName: m.name || r.item,
         brand: m.brand || '',
         matDetail: m.detail || '',
         matchKey: m.match || '',
+        skKeys: m.sk || [],
+        skNot: m.skNot || [],
       }
     })
   )

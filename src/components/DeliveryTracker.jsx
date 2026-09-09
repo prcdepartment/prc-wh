@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { deliveryRows, DELIVERY_STATUSES, deliveryStatusCounts, distinctProjects, distinctTrades } from '../data/deliveryTracker'
-import { Card, KpiCard } from './ui'
+import { buildGanttRows } from '../data/deliveryGantt'
+import { Card, KpiCard, Toggle } from './ui'
 import Select from './Select'
 import DataSheet from './DataSheet'
+import DeliveryGantt from './DeliveryGantt'
 import { num, fmtDate, fmtTargetText, fmtTower } from '../lib/format'
 import { seriesFor } from '../lib/colors'
 import { useTheme } from '../context/ThemeContext'
@@ -18,15 +20,20 @@ const TONE_ROLE = { danger: 'outgoing', warn: 'damaged', info: 'incoming', neutr
 const PROJECTS = distinctProjects()
 const TRADES = distinctTrades()
 
-// Target delivery is mixed in the source: a real date on most rows, a free-text estimate
-// ("August 2026") where no firm date exists. Sorting keys on the ISO date when there is
-// one and pushes the text-only rows last, since they cannot be ordered against it.
-const targetLabel = (r) => (r.targetDate ? fmtDate(new Date(`${r.targetDate}T00:00:00`)) : fmtTargetText(r.targetText) || 'TBC')
+// The card is a Gantt now. The flat table is kept behind a toggle rather than deleted:
+// it is the only place that still shows Location / Tower, DP payment status and both
+// sets of remarks in a scannable column, and a schedule is sometimes read as a list.
+const VIEWS = [
+  { value: 'gantt', label: 'Timeline', icon: 'trend' },
+  { value: 'table', label: 'Table', icon: 'layers' },
+]
 
 export default function DeliveryTracker() {
   const { theme } = useTheme()
   const S = seriesFor(theme)
   const master = useItemMaster()
+  const [view, setView] = useState('gantt')
+  const [unit, setUnit] = useState('month')
   const [status, setStatus] = useState('')
   const [project, setProject] = useState('')
   const [trade, setTrade] = useState('')
@@ -60,6 +67,19 @@ export default function DeliveryTracker() {
       return true
     })
   }, [status, project, trade, search])
+
+  // The Gantt's own rows are material x project, so the filter bar is applied by asking
+  // which of them still has a scheduled delivery in the filtered set. A status filter
+  // narrows to the rows carrying a delivery in that bucket rather than dropping bars
+  // from a row — a row whose bars were partly removed would have an In column that no
+  // longer summed to what is drawn on it.
+  const ganttRows = useMemo(() => {
+    const all = buildGanttRows()
+    const filtersOn = Boolean(status || project || trade || search)
+    if (!filtersOn) return all
+    const keep = new Set(rows.map((r) => `${r.materialName}|${r.projectCode || r.project}`))
+    return all.filter((r) => keep.has(r.key))
+  }, [rows, status, project, trade, search])
 
   const filtersOn = Boolean(status || project || trade || search)
   const reset = () => { setStatus(''); setProject(''); setTrade(''); setSearch('') }
@@ -146,10 +166,26 @@ export default function DeliveryTracker() {
     },
   ], [codeByKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const filterBar = (
+    <>
+      <div className="field lookup inv-search">
+        <div className="lookup-box">
+          <Icon name="search" size={14} className="lookup-ico" />
+          <input className="input lookup-input" placeholder="Search item, project, location or remarks…"
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      <Select value={status} options={DELIVERY_STATUSES.map((s) => s.key)} placeholder="All Statuses" size="sm" onChange={setStatus} />
+      <Select value={project} options={PROJECTS} placeholder="All Projects" size="sm" onChange={setProject} />
+      <Select value={trade} options={TRADES} placeholder="All Trades" size="sm" onChange={setTrade} align="right" />
+    </>
+  )
+
   return (
     <Card
       pad={false}
       title="Delivery Tracker" icon="truck" iconColor={S.total}
+      right={<Toggle options={VIEWS} value={view} onChange={setView} size="sm" />}
     >
       <div className="dtk-kpis">
         <KpiCard label="Total Scheduled" value={num(deliveryRows.length)} unit="deliveries" icon="truck" color={S.neutral}
@@ -162,32 +198,33 @@ export default function DeliveryTracker() {
         ))}
       </div>
 
-      <DataSheet
-        columns={columns}
-        rows={rows}
-        groupBy={[{ key: 'trade', label: 'Trade' }]}
-        defaultGrouping="full"
-        pageSize={40}
-        rowKey={(r) => r.no}
-        note='Source: "Warehouse Schedule" sheet.'
-        scrollClass="sheet-scroll dtk-scroll"
-        filtersOn={filtersOn}
-        resetFilters={reset}
-        filters={
-          <>
-            <div className="field lookup inv-search">
-              <div className="lookup-box">
-                <Icon name="search" size={14} className="lookup-ico" />
-                <input className="input lookup-input" placeholder="Search item, project, location or remarks…"
-                  value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-            </div>
-            <Select value={status} options={DELIVERY_STATUSES.map((s) => s.key)} placeholder="All Statuses" size="sm" onChange={setStatus} />
-            <Select value={project} options={PROJECTS} placeholder="All Projects" size="sm" onChange={setProject} />
-            <Select value={trade} options={TRADES} placeholder="All Trades" size="sm" onChange={setTrade} align="right" />
-          </>
-        }
-      />
+      {view === 'gantt' ? (
+        <>
+          <div className="sheet-filters">
+            {filterBar}
+            {filtersOn && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>
+                <Icon name="close" size={13} /> Reset
+              </button>
+            )}
+          </div>
+          <DeliveryGantt rows={ganttRows} unit={unit} onUnit={setUnit} />
+        </>
+      ) : (
+        <DataSheet
+          columns={columns}
+          rows={rows}
+          groupBy={[{ key: 'trade', label: 'Trade' }]}
+          defaultGrouping="full"
+          pageSize={40}
+          rowKey={(r) => r.no}
+          note='Source: "Warehouse Schedule" sheet.'
+          scrollClass="sheet-scroll dtk-scroll"
+          filtersOn={filtersOn}
+          resetFilters={reset}
+          filters={filterBar}
+        />
+      )}
     </Card>
   )
 }

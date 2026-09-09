@@ -1,0 +1,371 @@
+/* ===========================================================================
+   Delivery Tracker — Gantt view.
+
+   Module-scoped, imported by src/components/DeliveryGantt.jsx so it ships in the
+   dashboard chunk that actually renders it (the same split src/styles/floorplan.css
+   uses). Every selector is under .gtt-root; nothing here leaks.
+
+   LAYOUT — three panes, one horizontal scroll.
+
+   .gtt-frame is a flex row of three grids that share ONE row template:
+
+       .gtt-left  (frozen)   .gtt-mid  (scrolls x)   .gtt-right (frozen)
+
+   The row heights are passed in from JS as an explicit grid-template-rows on all
+   three panes, so the identity columns, the bars and the EOH figure stay on the same
+   line without any sticky-position arithmetic and without a scroll listener syncing
+   panes. Row heights VARY: a row whose bars collide stacks them into sub-rows and
+   grows, so the template cannot be a constant here.
+
+   There is deliberately NO internal vertical scroll. Thirteen rows fit inside the
+   page's own scroll, and three panes scrolling vertically in step would need JS to
+   keep them aligned — a cost worth paying only once the row count makes it necessary.
+   =========================================================================== */
+
+/* Column widths. Kept tight on purpose: at 96/232/78/78/78 the frozen left pane came to
+   562px and left the timeline only 713px of a 1374px card — under half the width, on the
+   view whose whole point is the timeline. These total 500px, which buys the chart 62px
+   back without truncating a five-figure quantity or the material name. */
+.gtt-root {
+  --gtt-code: 92px;
+  --gtt-desc: 212px;
+  --gtt-num: 66px;
+  --gtt-eoh: 88px;
+  --gtt-bar-h: 13px;
+
+  /* Two module-scoped inks, because this card prints the incoming role and the "today"
+     marker at 9-12px and the shared palette values fall just short of AA at that size
+     on white: --orange (#b85f13) measures 4.48:1 and white-on---accent 4.12:1, against
+     4.5 needed. Same hues, darkened only as far as the ratio requires. The ink is used
+     for TEXT only — the bar fills, the dashed line and the legend swatches keep the
+     palette colours, which are graphics and clear the 3:1 they need.
+     --gtt-ink-in is the value Movement History already uses for this role
+     (MOVEMENT_LIGHT.incoming in src/lib/colors.js), so it is not a new colour. */
+  --gtt-ink-in: #8c460b;        /* 7.0:1 on white */
+  --gtt-now-ink: var(--brand-red-dark);  /* white on it = 5.8:1 */
+}
+
+[data-theme='dark'] .gtt-root {
+  /* The dark set already clears AA comfortably (8.74 and 5.45 measured), so these just
+     point back at the palette rather than carrying a second set of overrides. */
+  --gtt-ink-in: var(--orange-soft);
+  --gtt-now-ink: var(--accent);
+}
+
+/* ------------------------------------------------------------------ controls */
+.gtt-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.gtt-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.gl {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--text-muted); white-space: nowrap;
+}
+.gl-sw { width: 20px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+/* Scheduled: an outline, because it has not happened. Received: filled. The two must
+   read apart at a glance when they overlap on the same row. */
+.gl-plan { background: color-mix(in srgb, var(--c) 18%, transparent); border: 1.5px solid var(--c); }
+.gl-act { background: var(--c); }
+.gl-est { background: color-mix(in srgb, var(--c) 10%, transparent); border: 1.5px dashed var(--c); }
+.gl-now { width: 0; height: 12px; border-left: 2px dashed var(--accent); flex: 0 0 auto; }
+.gl-cur { width: 0; height: 12px; border-left: 2px solid var(--text); flex: 0 0 auto; }
+
+.gtt-ctl { display: flex; align-items: center; gap: 8px; }
+.gtt-ctl .btn-xs {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px; font-size: 11px; font-weight: 700;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-muted);
+}
+.gtt-ctl .btn-xs:hover { background: var(--surface-2); color: var(--text); }
+/* Brand red as 11px TEXT is 4.12:1 on white; the deeper red is 5.8:1. The border keeps
+   the brand colour — a 1px rule is a graphic, not text. */
+.gtt-ctl .btn-xs.is-on { border-color: var(--accent); color: var(--gtt-now-ink); }
+[data-theme='dark'] .gtt-ctl .btn-xs.is-on { color: var(--brand-red-soft); }
+.gtt-ctl .rot90 { transform: rotate(90deg); }
+
+/* ------------------------------------------------------------------ frame */
+.gtt-frame { display: flex; align-items: flex-start; min-width: 0; }
+.gtt-pane { display: grid; }
+.gtt-left, .gtt-right { flex: 0 0 auto; position: relative; z-index: 2; background: var(--surface); }
+.gtt-left { border-right: 1px solid var(--border-strong); }
+.gtt-right { border-left: 1px solid var(--border-strong); }
+.gtt-mid { flex: 1 1 0; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.gtt-canvas { position: relative; }
+
+/* Header band. Both panes' headers are the same height (passed from JS) so the three
+   grids stay in step. */
+.gtt-head {
+  position: relative;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+  font-size: 10px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.gtt-lrow, .gtt-rrow {
+  display: grid; align-items: center;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+.gtt-lrow { grid-template-columns: var(--gtt-code) var(--gtt-desc) var(--gtt-num) var(--gtt-num) var(--gtt-num); }
+.gtt-rrow { grid-template-columns: var(--gtt-eoh); }
+.gtt-lrow.is-sel, .gtt-rrow.is-sel, .gtt-row.is-sel { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+/* .gtt-lrow is declared after .gtt-head, so the header's stronger divider and its own
+   type scale have to be restated at two-class specificity or the row rules win. */
+.gtt-lrow.gtt-head, .gtt-rrow.gtt-head { border-bottom: 1px solid var(--border-strong); }
+.gtt-head .gc { font-size: inherit; font-weight: inherit; letter-spacing: inherit; color: inherit; }
+
+.gc { padding: 0 9px; min-width: 0; font-size: 12px; color: var(--text); }
+.gtt-head .gc { padding: 0 9px; }
+.gc-n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.gc-in { color: var(--gtt-ink-in); }
+.gc-out { color: var(--brand-red-darker); }
+
+.gc-code { display: flex; align-items: baseline; gap: 4px; font-family: 'Consolas', 'SF Mono', monospace; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.gc-more { font-style: normal; font-size: 9px; font-weight: 800; color: var(--text-faint); }
+/* The BOH reconciliation marker. Small, but it must be visible — it says the source's
+   own totals disagree with its dated movements on that line. */
+.gc-flag {
+  font-style: normal; font-weight: 900; color: var(--warn);
+  margin-left: 3px; font-size: 12px;
+}
+.gc-tbc { display: block; font-style: normal; font-size: 9px; font-weight: 700; color: var(--text-faint); letter-spacing: 0.02em; }
+
+.gc-desc { display: flex; flex-direction: column; justify-content: center; gap: 1px; overflow: hidden; }
+.gd-name { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-sub { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-path { font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gc-eoh-h { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; line-height: 1.25; }
+.gc-eoh-h em { font-style: normal; font-size: 8.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-faint); text-transform: none; }
+.gc-eoh { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; font-size: 13px; }
+.gc-eoh-full { font-style: normal; font-size: 9px; font-weight: 700; color: var(--text-faint); }
+
+/* ------------------------------------------------------------------ timeline head */
+.gtt-thead { display: flex; flex-direction: column; }
+/* The cursor rail is the header's padding-bottom, tinted a shade deeper than the header
+   so the handle reads as running in a track rather than floating over the chart. */
+.gtt-thead::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 24px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-top: 1px solid var(--border);
+}
+.gtt-groups, .gtt-ticks { position: relative; flex: 1 1 0; }
+.gtg, .gtk {
+  position: absolute; top: 0; bottom: 0;
+  display: flex; align-items: center;
+  box-sizing: border-box;
+}
+.gtg { justify-content: flex-start; padding-left: 8px; font-size: 10px; font-weight: 800; color: var(--text); border-left: 1px solid var(--border-strong); }
+.gtk { justify-content: center; font-size: 9.5px; font-weight: 700; color: var(--text-muted); border-left: 1px solid var(--border); }
+.gtk.alt { background: color-mix(in srgb, var(--text) 3%, transparent); }
+
+/* ------------------------------------------------------------------ rows + bars */
+.gtt-row { position: relative; border-bottom: 1px solid var(--border); }
+.gtt-gl { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); pointer-events: none; }
+.gtt-gl.alt { background: color-mix(in srgb, var(--text) 2%, transparent); }
+
+.gtt-lane { position: relative; }
+/* A hairline between the in and out lanes of ONE row, lighter than the row divider, so
+   the pair still reads as one material rather than two. */
+.gtt-lane-out { border-top: 1px dashed var(--border); }
+.gtt-lane-tag {
+  position: absolute; left: 3px; top: 2px;
+  font-size: 8px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-faint); opacity: 0.55; pointer-events: none;
+}
+
+.gbar {
+  position: absolute; height: var(--gtt-bar-h);
+  box-sizing: border-box; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; cursor: default;
+  transition: filter 0.12s ease, box-shadow 0.12s ease;
+}
+.gbar:hover { filter: brightness(1.06); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 35%, transparent); z-index: 3; }
+
+/* Scheduled — an outline with a light wash. Not filled: it has not happened yet, and a
+   solid bar for a promise reads as a fact. */
+.gbar-plan {
+  border: 1.5px solid var(--c);
+  background: color-mix(in srgb, var(--c) 16%, var(--surface));
+}
+/* An estimate rather than a firm date: dashed, because the bar's WIDTH is the size of
+   the window the source committed to, not a delivery that takes that long. */
+.gbar-est { border-style: dashed; background: color-mix(in srgb, var(--c) 9%, var(--surface)); }
+.gbar-tbc { background-image: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--c) 22%, transparent) 4px 8px); }
+
+/* Recorded — solid, with a soft top sheen, matching the movement-history bar treatment
+   so "this actually happened" looks the same across the app. */
+.gbar-act {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--c) 88%, white) 0%,
+    var(--c) 55%,
+    color-mix(in srgb, var(--c) 82%, black) 100%);
+  border: 1px solid color-mix(in srgb, var(--c) 70%, black);
+}
+
+.gb-n {
+  font-style: normal; font-size: 9.5px; font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.01em;
+  white-space: nowrap; padding: 0 3px;
+}
+.gbar-plan .gb-n { color: color-mix(in srgb, var(--c) 72%, var(--text)); }
+.gbar-act .gb-n { color: var(--white); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+
+/* A bar too narrow for its own number puts the number just outside its right edge —
+   which is what lets the bar be sized for the DATE instead of for the text. overflow
+   has to go visible for that, and the label takes the bar's own colour rather than
+   white, because it now sits on the row and not on the fill. packBars() reserves the
+   room so the next bar along cannot land on top of it. */
+.gbar-out { overflow: visible; }
+.gbar-out .gb-n {
+  position: absolute; left: 100%; top: 50%;
+  transform: translateY(-50%);
+  padding-left: 4px; padding-right: 0;
+  color: color-mix(in srgb, var(--c) 78%, var(--text));
+  text-shadow: none;
+}
+
+/* ------------------------------------------------------------------ overlay */
+/* The lines and the capacity window live INSIDE the scrolling canvas, so they are
+   pinned to a DATE and travel with the bars — which is what a reader expects of a
+   Gantt. The layer itself is click-through except for its own children, so bar
+   tooltips still work underneath. */
+.gtt-overlay { position: absolute; inset: 0; pointer-events: none; }
+.gtt-overlay > * { pointer-events: auto; }
+
+.gtt-now {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 2px dashed var(--accent);
+  pointer-events: none; z-index: 4;
+}
+/* Pinned to the LEFT of its line, while the grip's label is centred on the cursor —
+   so the pair stay legible on the day they coincide, which is every first load. */
+.gtt-now em {
+  position: absolute; top: 2px; right: 4px;
+  font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--white); background: var(--gtt-now-ink);
+  padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+}
+
+.gtt-cursor {
+  position: absolute; top: 0; bottom: 0; width: 0;
+  border-left: 2px solid var(--text);
+  z-index: 5;
+}
+.gtt-cursor.is-drag { border-left-color: var(--accent); }
+/* The grip lives in the header's cursor rail (see HEAD_BANDS / CURSOR_RAIL in
+   DeliveryGantt.jsx, which sets its `top`). It is centred on the line while the "Today"
+   chip is pinned to the chip's left, so the two stay legible on the day they coincide —
+   which is every first load. */
+.gtt-grip {
+  position: absolute; left: 0;
+  transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 7px;
+  background: var(--text); color: var(--bg-elev);
+  border: none; border-radius: 10px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em;
+  cursor: ew-resize; white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  touch-action: none;
+}
+.gtt-cursor.is-drag .gtt-grip { background: var(--accent); }
+.gtt-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The travelling capacity window. It sits in the foot strip below the last row — a
+   padding-bottom on all three panes — so it never covers a bar. Its left offset is
+   clamped in JS (see CAPWIN_W); translateX(-50%) then centres it on the line. */
+.gtt-capwin {
+  position: absolute; bottom: 6px; left: 0;
+  transform: translateX(-50%);
+  width: 168px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 7px 9px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 6;
+}
+.gcw-hd {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 8.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.gcw-m2 { font-size: 19px; font-weight: 800; line-height: 1.05; color: var(--text); font-variant-numeric: tabular-nums; }
+.gcw-m2 em { font-style: normal; font-size: 10px; font-weight: 700; color: var(--text-muted); margin-left: 2px; }
+.gcw-sub { font-size: 9.5px; font-weight: 600; color: var(--text-muted); }
+.gcw-net { display: flex; align-items: center; gap: 2px; font-size: 9.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.gcw-net.up { color: var(--gtt-ink-in); }
+.gcw-net.dn { color: var(--green); }
+.gcw-track { display: block; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; margin-top: 3px; }
+.gcw-track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.gcw-track i.over { background: var(--brand-red-darker); }
+.gcw-foot { font-size: 8.5px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-faint); }
+
+.gtt-empty { padding: 22px 16px 26px; }
+
+/* ------------------------------------------------------------------ note */
+.gtt-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0; padding: 10px 16px 14px;
+  font-size: 10.5px; line-height: 1.55; color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+.gtt-note svg { flex: 0 0 auto; margin-top: 2px; color: var(--warn); }
+.gtt-note strong { color: var(--text); font-weight: 800; }
+.gtt-note em { font-style: italic; }
+
+/* ------------------------------------------------------------------ dark */
+[data-theme='dark'] .gtt-now em { color: var(--brand-black); }
+[data-theme='dark'] .gtt-grip { background: var(--brand-gray); color: var(--brand-black); }
+[data-theme='dark'] .gtt-cursor { border-left-color: var(--brand-gray); }
+[data-theme='dark'] .gbar-act .gb-n { color: var(--brand-black); text-shadow: none; }
+[data-theme='dark'] .gbar-out .gb-n { color: color-mix(in srgb, var(--c) 84%, var(--text)); }
+[data-theme='dark'] .gc-out { color: var(--brand-red-mid); }
+
+/* ------------------------------------------------------------------ narrow
+   BELOW 860px THE COLUMNS STOP BEING FROZEN AND THE WHOLE FRAME PANS AS ONE.
+
+   Freezing does not survive a phone. Measured at 375px with the three-pane layout, the
+   identity columns took 245px and EOH 63px out of a 349px card and left the timeline
+   FORTY-ONE PIXELS — a Gantt with no chart in it. Trimming column widths cannot fix
+   that; the frozen width is simply most of the screen.
+
+   So the scroll container moves up one level: .gtt-frame scrolls, .gtt-mid stops
+   scrolling and contributes its full canvas width, and the identity columns pan out of
+   view to the left as the reader moves right. Rows stay aligned because the three panes
+   are still flex siblings on one shared row template. Every column stays visible —
+   requirement asks for Item Code and BOH, and making someone scroll for them beats
+   hiding them.
+
+   dateFromClientX needs no branch for this: it reads .gtt-mid's own client rect, which
+   moves with whichever ancestor is scrolling, plus that element's own scrollLeft (zero
+   here). The initial scroll-to-today picks its target at runtime — see scrollerEl(). */
+@media (max-width: 1100px) {
+  .gtt-root { --gtt-desc: 190px; --gtt-num: 68px; --gtt-eoh: 84px; }
+}
+@media (max-width: 860px) {
+  .gtt-root { --gtt-code: 84px; --gtt-desc: 176px; --gtt-num: 62px; --gtt-eoh: 76px; }
+  .gtt-frame { overflow-x: auto; }
+  .gtt-mid { overflow-x: visible; flex: 0 0 auto; }
+  /* No longer overlaying a scrolling neighbour, so the frozen-pane shadow/stack is off. */
+  .gtt-left, .gtt-right { z-index: auto; }
+  .gtt-bar { flex-direction: column; align-items: stretch; }
+  .gtt-ctl { justify-content: flex-end; }
+}
+@media (max-width: 560px) {
+  .gtt-root { --gtt-code: 78px; --gtt-desc: 156px; --gtt-num: 58px; --gtt-eoh: 68px; }
+  .gtt-legend { gap: 8px 10px; }
+  .gl { font-size: 9.5px; }
+  .gtt-capwin { width: 138px; padding: 6px 7px; }
+  .gcw-m2 { font-size: 16px; }
+  .gtt-note { padding: 10px 12px 14px; }
+}

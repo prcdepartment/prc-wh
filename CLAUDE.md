@@ -2666,3 +2666,148 @@ statements, zero violations** — 1,191 being exactly inventory 827 + ledger 295
 inserts are all inside `03`, so the partial load from the failed attempt is cleared by the
 re-run. `01`, `02` and `04` do not need repeating. `npm run model` regenerated (202 columns
 now that the comment landed) and `npm run build` passes.
+
+### 2026-09-09 — Session: Delivery Tracker rebuilt as a Gantt
+
+The tracker card was one flat table of the "Warehouse Schedule" sheet. It is now a
+timeline: frozen identity + quantity columns on the left, a Gantt in the middle, an EOH
+column on the right, a draggable position line and a travelling floor-space read-out.
+New `src/data/deliveryGantt.js` (model), `src/components/DeliveryGantt.jsx` (chart),
+`src/styles/gantt.css` (module-scoped, imported by the component like `floorplan.css`).
+The old table is kept behind a **Timeline / Table** toggle in the card head — it is still
+the only place Location / Tower, DP status and both sets of remarks are scannable columns.
+
+**The schedule alone cannot draw this chart, so it is joined to two more sources.** The
+sheet has 27 planned deliveries and no stock, no history and no item codes. Rows are
+**material x project** (a batch number only means something inside a project), giving 13
+rows, and each joins to the safekeeping sheets — the same warehouse, the same five
+projects, the same materials:
+
+| Column / lane | Comes from |
+|---|---|
+| Item Code | real codes from the safekeeping join; item master by keyword where a material has never been booked in |
+| BOH | derived — see below |
+| Incoming / Outgoing | the sum of that lane's own bars |
+| in lane, before today | `safekeeping.incoming`, one bar per document reference |
+| in lane, after today | the 27 scheduled deliveries |
+| out lane | `safekeeping.outgoing` — recorded pullouts only |
+| EOH | BOH + received − issued, counted to the position line |
+
+The bridges are `SK_PROJECT_KEY` (the sheet's own short code, the only stable key both
+sides share) and `MATERIAL_MAP.sk` in `deliveryTracker.js` — description **keywords**, not
+item codes, so nothing confidential is committed and the codes resolve at runtime. Two
+materials resolve to nothing and that is the data: no sealant and no wooden door has ever
+been booked into safekeeping. Splice-sleeve grouts are deliberately NOT folded into
+"Rebar Coupler & Accessories"; fold them in if procurement says they belong.
+
+**Both quantity columns are DERIVED from the bars, and that is forced, not stylistic.**
+The requirement is that every bar carries a number and those numbers sum to the column.
+Checked against this snapshot, the SOH sheet's own `in` disagrees with the sum of its
+dated Incoming rows on **29 of 67** project+code pairs — Avesta's formwork lines carry an
+`in` total with no dated rows behind it at all. Those totals cover a different period.
+Reading the sheet total next to bars adding to something else would print an arithmetic
+error on the face of the card.
+
+**BOH had to be derived too, and this one nearly shipped wrong.** The sheet reports Jab's
+wiring devices at `boh` 10,064 with `in` 0, while the Incoming sheet separately carries
+10,064 dated units of the same six codes. Both describe ONE arrival. The first build took
+the sheet's `boh` and added the dated receipts on top: **BOH 10,064 + In 10,064 = EOH
+20,028 for stock that arrived once.** The sheet's "beginning" is the start of ITS period,
+not of this timeline. BOH is now wound back off the sheet's closing position —
+`sheet SOH − every dated receipt + every dated pullout` — which makes the row reconcile:
+at the right-hand end, `EOH = sheet SOH + everything still scheduled`. Jab comes out at
+BOH 0 (correct — it was not there before the window) and EOH 9,964, exactly the sheet's
+own SOH. Where the source is inconsistent enough to drive this negative the value is
+clamped to 0 and the row is flagged with a marker and a tooltip saying so; **0 of 13 rows
+needed the clamp** on this snapshot.
+
+**Bar length is the precision of the commitment.** A firm date covers one day; "First Week
+August 2026" seven; "Mid September 2026" the middle third; "August, 2026" the whole month.
+A wide bar means a vague promise, not a long delivery, and the tooltip says so. Spans are
+half-open so adjacent months never overlap by an instant. `parseQty` multiplies out the
+sheet's `207 * 7` products (its UOM says items per set) and keeps the source string for
+the tooltip; **TBC bars are excluded from every total rather than counted as zero**, and
+the column shows `+n TBC` beside its figure.
+
+**The position line is draggable and pro-rates.** EOH is `BOH + received − issued` to the
+line, reading the cursor as end-of-day; a bar spanning a month is counted pro rata, which
+is why dragging to 2 October shows 22 of a 348-unit "October 2026" batch (2/31). Buttons
+for Today and End, arrow keys, and click-anywhere-on-the-chart. At the End the "of N" hint
+disappears and every EOH equals BOH + In − Out exactly.
+
+**The floor-space window is provisional and says so.** Rack arithmetic is real, from the
+same drawing the Floor Plan uses: a Type B bay is 3.3 m x 1.29 m over five levels, and the
+plan's own back-to-back pitch (86/34) adds 2.53x for the aisle, giving **2.16 m2 of floor
+per pallet position**. What is estimated is `UNITS_PER_PALLET` — no source workbook records
+a pack size — and every figure is inversely proportional to it, so the tooltip prints the
+value used for each material next to the positions it produced. **This is the table for the
+warehouse team to correct line by line.** The sensitivity is not academic: the first pass
+had kitchen cabinets at 2/pallet and plumbing at 12, and the card read 2,989 m2 (243% of
+the Safekeeping area); at 4 and 24 it reads 1,691 m2 (137%). Compared against Safekeeping's
+own **1,232 m2** from the floor-plan geometry, since project-owned material lives there.
+
+**There is no outbound schedule anywhere in this system.** No workbook, table or sheet
+plans a release, so the out lane is empty right of today on every row. The card states
+that rather than letting a reader conclude nothing is due to leave. Wiring an outbound
+plan is the obvious next step if procurement wants EOH to mean anything past today.
+
+**Six bugs found and fixed while verifying, each caught by measurement:**
+- **The drag stuck on.** The pane's `onPointerUp` called `releasePointerCapture` for a
+  pointer the *grip* had captured, so the drag never ended: `dragging` stayed true and
+  every later mouse move dragged the line — it wandered to a new date between two
+  read-only measurement calls, which is how it was noticed. Move/up now live on `window`
+  for the gesture's duration, plus `pointercancel` and `blur`. A window-level pointerup
+  cannot be missed.
+- **Click-to-move was on `pointerdown`.** That fires at the start of a sideways scroll
+  gesture, so on a phone every attempt to pan the timeline would fling the line. Now
+  `click`, which only completes when the pointer stays put.
+- **19 of 52 bar numbers were clipped.** `MIN_BAR` was 36 so labels could sit inside, and
+  "10,654" still wants 49px — while every one-day bar drew 14 days wide at Month
+  granularity. The bar is now sized for the DATE (`MIN_BAR` 16) and a label too big for it
+  is drawn just outside the right edge, with `packBars` reserving that room so a
+  neighbour cannot land on it. At Day granularity nothing is stretched at all: measured
+  widths of 30 / 210 / 300 / 930 px are exactly 1, 7, 10 and 31 days.
+- **The capacity window covered the last row** by 30px. It renders 120px tall at a 6px
+  offset; the foot strip was 96. Now 134, applied as `padding-bottom` on all three panes
+  so their feet stay level.
+- **The grip had nowhere to live.** In the tick band its 92px width covered a month's
+  label; at the top it landed on the "Today" chip (both start on the same date, every
+  first load); parked at the foot beside its own read-out it fell below a laptop's fold.
+  The header now carries a dedicated 24px **cursor rail** (`HEAD_BANDS` + `CURSOR_RAIL`),
+  and the Today chip is pinned left of its line while the grip centres on the cursor.
+- **The frozen columns left 41px of timeline at 375px.** Freezing cannot survive a phone —
+  245px of identity plus 63px of EOH out of a 349px card. Below 860px the scroll container
+  moves up a level: the whole frame pans as one, the identity columns scroll away, and
+  every column stays visible rather than being hidden. `scrollerEl()` picks the scroller by
+  asking which element actually overflows, so JS and the media query cannot disagree.
+
+**Verified.** A Node probe (esbuild-bundled against the private masters) asserts the
+invariants: bars sum to their column, `EOH = BOH + In − Out`, EOH left of every bar equals
+BOH, EOH at the end equals `sheet SOH + planned`, incoming counted is monotonic in the
+cursor, non-negative BOH, and all 27 target spans resolve — **all pass**. In the browser at
+1440x900 and 375x812, light and dark, across all four granularities: 52 bars with **zero
+clipped numbers, zero bars escaping their lane, zero labels overlapping the next bar, zero
+misaligned rows** (all three panes share one row template), matching header heights, and no
+page-level horizontal scroll on any view. Drag exercised end to end including release
+outside the window; capacity moved 1,691 → 2,433 m2 and the window travelled with the
+line. Contrast audited element by element in both themes: **zero failures**, minimum
+5.45:1 dark and 4.65:1 light. Four light-mode near-misses were fixed with two
+module-scoped inks rather than by re-toning the shared palette — `--gtt-ink-in` (the value
+Movement History already uses for this role, 4.48 → 7.01) and `--gtt-now-ink` (white on
+brand red 4.12 → 5.84). Both empty states render the right message (nothing loaded vs a
+filter matching nothing) and the session-less case logs no console errors. `npm run build`
+passes and `dist/` carries no item code, price, bin location, document reference or
+project name beyond the five already committed in `deliveryTracker.js`.
+
+**Measurement notes.** Two traps cost real time and both are already in this file. HMR
+re-executed `deliveryGantt.js` without re-running the fixture that fills the data arrays,
+so the browser reported 684 m2 against Node's 1,691 — the "arrays must be mutated, never
+reassigned" hazard, arriving via hot reload. A hard reload settled it. And
+`requestAnimationFrame` does not fire while the browser pane is hidden, so any measurement
+loop that awaits a frame times out; `setTimeout` plus one action per call is the way.
+Screenshots stopped compositing part-way through, as in every previous session, so all
+figures above are DOM measurements.
+
+**Open question for the warehouse team:** `UNITS_PER_PALLET` in `deliveryGantt.js` — how
+many of each material actually fit a pallet position? It is the single largest source of
+error in the floor-space figure.

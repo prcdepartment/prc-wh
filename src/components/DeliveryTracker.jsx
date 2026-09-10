@@ -34,6 +34,7 @@ export default function DeliveryTracker() {
   const master = useItemMaster()
   const [view, setView] = useState('gantt')
   const [unit, setUnit] = useState('month')
+  const [mode, setMode] = useState('both')
   const [status, setStatus] = useState('')
   const [project, setProject] = useState('')
   const [trade, setTrade] = useState('')
@@ -68,17 +69,19 @@ export default function DeliveryTracker() {
     })
   }, [status, project, trade, search])
 
-  // The Gantt's own rows are material x project, so the filter bar is applied by asking
-  // which of them still has a scheduled delivery in the filtered set. A status filter
-  // narrows to the rows carrying a delivery in that bucket rather than dropping bars
-  // from a row — a row whose bars were partly removed would have an In column that no
-  // longer summed to what is drawn on it.
-  const ganttRows = useMemo(() => {
-    const all = buildGanttRows()
+  // The Gantt groups by material and holds the projects as children, so the filter is
+  // handed down as a predicate on the material x project rows and the parents are
+  // rebuilt from whatever survives. Filtering the parents instead would leave a
+  // material whose BOH / In / Out still counted projects it no longer lists.
+  //
+  // A status filter narrows to the rows CARRYING a delivery in that bucket rather than
+  // dropping individual bars: a row with some of its bars removed would have an In
+  // column that no longer summed to what is drawn on it.
+  const ganttParents = useMemo(() => {
     const filtersOn = Boolean(status || project || trade || search)
-    if (!filtersOn) return all
+    if (!filtersOn) return buildGanttRows()
     const keep = new Set(rows.map((r) => `${r.materialName}|${r.projectCode || r.project}`))
-    return all.filter((r) => keep.has(r.key))
+    return buildGanttRows((leaf) => keep.has(leaf.key))
   }, [rows, status, project, trade, search])
 
   const filtersOn = Boolean(status || project || trade || search)
@@ -208,7 +211,7 @@ export default function DeliveryTracker() {
               </button>
             )}
           </div>
-          <DeliveryGantt rows={ganttRows} unit={unit} onUnit={setUnit} />
+          <DeliveryGantt parents={ganttParents} unit={unit} onUnit={setUnit} mode={mode} onMode={setMode} />
         </>
       ) : (
         <DataSheet

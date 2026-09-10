@@ -266,7 +266,10 @@ function actualBars(rows, lane) {
 // sheet schedules a release out of the warehouse, so the outgoing lane is empty to the
 // right of the now line on every row. The card says so rather than leaving a reader to
 // conclude that nothing is due to leave.
-export function buildGanttRows() {
+// Leaf rows: one per material x project. These are what the safekeeping join is done
+// against, because a project is what identifies a batch and what the safekeeping sheets
+// are keyed by. They are returned as the CHILDREN of a material — see buildGanttRows.
+function buildLeafRows() {
   const byKey = new Map()
 
   for (const d of deliveryRows) {
@@ -283,6 +286,7 @@ export function buildGanttRows() {
         skNot: d.skNot || [],
         project: d.project,
         projectCode: d.projectCode || '',
+        isChild: true,
         trade: d.trade,
         uom: '',
         planned: [],
@@ -337,11 +341,103 @@ export function buildGanttRows() {
     finalise(row)
   }
 
-  const rows = [...byKey.values()]
+  return [...byKey.values()]
+}
+
+// ---------------------------------------------------------------------------
+// PARENT ROWS — one per MATERIAL, holding its projects as children.
+//
+// The schedule is read material-first ("where are the couplers up to?") and only then
+// project-by-project, so the material is the row and the project is the detail. A
+// material delivered to four sites was previously four unrelated rows with the same
+// name; now it is one row that opens.
+//
+// Every parent figure is the SUM of its children — BOH, In, Out, EOH — and its bar
+// lists are their concatenation, so the parent states exactly what its children state
+// and the two can never disagree. Bars that would collide on the parent's single track
+// are merged for DRAWING only (see packTrack in DeliveryGantt.jsx); the arithmetic here
+// is untouched by that.
+//
+// A material held for only one project still gets a parent row, but is not expandable:
+// opening it would show one child identical to the row above it.
+// `keepLeaf` is the filter bar, applied to the material x project rows BEFORE they are
+// grouped and summed. Filtering the parents instead — or trimming a parent's children
+// afterwards — would leave a parent stating totals for projects it no longer shows.
+export function buildGanttRows(keepLeaf) {
+  const byMaterial = new Map()
+  const leaves = keepLeaf ? buildLeafRows().filter(keepLeaf) : buildLeafRows()
+  for (const leaf of leaves) {
+    let p = byMaterial.get(leaf.materialName)
+    if (!p) {
+      p = {
+        key: leaf.materialName,
+        isParent: true,
+        materialName: leaf.materialName,
+        brand: leaf.brand,
+        matDetail: leaf.matDetail,
+        trade: leaf.trade,
+        uom: leaf.uom,
+        children: [],
+      }
+      byMaterial.set(leaf.materialName, p)
+    }
+    p.children.push(leaf)
+    if (!p.uom && leaf.uom) p.uom = leaf.uom
+  }
+
+  const parents = [...byMaterial.values()]
+  for (const p of parents) {
+    p.children.sort((a, b) => (a.firstDate || Infinity) - (b.firstDate || Infinity) || a.project.localeCompare(b.project))
+    p.expandable = p.children.length > 1
+    p.projectCount = p.children.length
+    p.projects = p.children.map((c) => c.project)
+
+    const sum = (f) => p.children.reduce((a, c) => a + (Number(f(c)) || 0), 0)
+    p.boh = sum((c) => c.boh)
+    p.totalIn = sum((c) => c.totalIn)
+    p.totalOut = sum((c) => c.totalOut)
+    p.tbcIn = sum((c) => c.tbcIn)
+    p.tbcOut = sum((c) => c.tbcOut)
+    p.eoh = p.boh + p.totalIn - p.totalOut
+    p.sheetSoh = sum((c) => c.sheetSoh)
+    p.recordedIn = sum((c) => c.recordedIn)
+    p.recordedOut = sum((c) => c.recordedOut)
+    p.bohAdjusted = p.children.some((c) => c.bohAdjusted)
+
+    // Concatenated, not recomputed: rowAt() and capacityAt() then give a parent exactly
+    // the sum of its children at any cursor position, by construction.
+    const cat = (f) => p.children.flatMap(f)
+    p.planned = cat((c) => c.planned).sort(byStart)
+    p.actualIn = cat((c) => c.actualIn).sort(byStart)
+    p.actualOut = cat((c) => c.actualOut).sort(byStart)
+    p.inBars = cat((c) => c.inBars).sort(byStart)
+    p.outBars = cat((c) => c.outBars).sort(byStart)
+    p.noDateBars = cat((c) => c.noDateBars)
+    p.codes = [...new Set(cat((c) => c.codes))].sort()
+
+    const all = [...p.inBars, ...p.outBars]
+    p.firstDate = all.length ? Math.min(...all.map((b) => b.start.getTime())) : null
+    p.lastDate = all.length ? Math.max(...all.map((b) => b.end.getTime())) : null
+    p.plannedCount = sum((c) => c.plannedCount)
+  }
+
   // Trade first (the schedule's own primary grouping), then earliest commitment, so a
   // reader scanning down meets the work in the order it lands.
-  rows.sort((a, b) => a.trade.localeCompare(b.trade) || (a.firstDate || Infinity) - (b.firstDate || Infinity) || a.materialName.localeCompare(b.materialName))
-  return rows
+  parents.sort((a, b) => a.trade.localeCompare(b.trade) || (a.firstDate || Infinity) - (b.firstDate || Infinity) || a.materialName.localeCompare(b.materialName))
+  return parents
+}
+
+// Every row the chart draws, in order, with the expanded materials opened out. One list
+// keeps the three panes and the row-height template in step — they all read this.
+export function visibleRows(parents, expanded) {
+  const out = []
+  for (const p of parents) {
+    out.push(p)
+    if (p.expandable && expanded.has(p.key)) {
+      for (const c of p.children) out.push(c)
+    }
+  }
+  return out
 }
 
 const byStart = (a, b) => (a.start ? a.start.getTime() : Infinity) - (b.start ? b.start.getTime() : Infinity)

@@ -2811,3 +2811,110 @@ figures above are DOM measurements.
 **Open question for the warehouse team:** `UNITS_PER_PALLET` in `deliveryGantt.js` — how
 many of each material actually fit a pallet position? It is the single largest source of
 error in the floor-space figure.
+
+### 2026-09-10 — Session: Gantt compressed, grouped by material, in/out/both switch
+
+Five changes to the Delivery Tracker timeline. Two of them forced a layout rewrite; the
+other three fell out of it.
+
+**1. Item Code column removed.** It stays in the Table view, which is where a code is
+looked up; on the timeline it was 92px of the frozen block for a value nobody scans.
+
+**3. Trade and project sub-lines removed.** The material name is now the whole cell.
+Trade moved into the name's tooltip; the project became the CHILD row's own label (see
+below), which is where it belongs once rows group by material. Losing the second and
+third lines is what makes a 22px row possible at all.
+
+**2 + 5. Fixed row heights, and a Both / In / Out switch that halves them.** A row is
+now one lane per shown direction — 44px in Both mode, **22px** in In or Out. Nothing
+stacks into extra sub-rows any more, so the chart's height is exactly rows x lane
+height, which is what lets it be capped to the display: `--gtt-maxh: calc(100vh - 240px)`
+with the scroll inside the card. Collapsed, all seven materials plus the header and the
+capacity strip come to **474px and do not scroll**; the card fell 948px → 819px. Fully
+expanded in In mode, all seventeen rows still fit in 540px.
+
+**The cost of a single track, and what pays for it.** Two bars on the same stretch of
+timeline can no longer sit side by side, so `packTrack` **merges** them: one bar, the
+summed quantity, a badge with the member count, and every constituent listed in the
+tooltip. That is honest and reads better than a pile-up, and the invariant survives —
+**the bar numbers still sum to the row's In / Out column, checked on all 17 rows**.
+Merging is a drawing decision only and depends on zoom: 14 merged bars at Month, 9 at
+Day, and the tooltip says so ("switch to Week or Day to separate them"). Verified at Day
+that bar widths are still exactly 30 / 90 / 210 / 300 / 930 px — 1, 3, 7, 10 and 31 days.
+
+Scheduled and recorded now share one track rather than getting a sub-row each. They stay
+apart by SIZE: the scheduled bar is a 13px outline and the recorded one a 7px fill
+centred inside it, so a delivery landing exactly on its target date still leaves the
+plan's outline showing above and below. Their labels take opposite sides — recorded to
+the left, scheduled to the right — so a bar drawn on top of the plan it fulfils does not
+put two numbers in the same place.
+
+**4. Rows group by material and open into their projects.** Seven materials collapsed,
+opening to thirteen project rows; four are expandable and three are single-project and
+carry no caret (opening one would show a duplicate of the row above). Children are
+indented under a hairline and labelled by project.
+
+Every parent figure is the **sum of its children** — BOH, In, Out, EOH — and its bar
+lists are their concatenation, so `rowAt()` and `capacityAt()` give a parent exactly the
+sum of its children at any cursor position by construction. **Measured in the DOM across
+all four expanded materials: parent === sum of children, pass.** Capacity is summed over
+parents only; including an opened child's rows as well would count that stock twice.
+
+The filter bar therefore had to move DOWN a level: `buildGanttRows(keepLeaf)` filters the
+material x project rows and rebuilds the parents from the survivors. Filtering parents
+instead — or trimming a parent's children after the sums were taken — would leave a
+material whose totals still counted projects it no longer listed.
+
+**The layout is one scroll container now, not three panes.** Frozen-left / scrolling-
+middle / frozen-right cannot share a VERTICAL scrollbar without a JS listener syncing
+three `scrollTop`s, and capping the height to the display made vertical scrolling real.
+So the panes became **sticky columns inside one scrollport**: `position: sticky` left on
+the identity block, right on EOH, top on the header, and both axes on the two corners.
+One scroll container, no listener. Measured with the rows scrolled 260px and the timeline
+520px: header pinned, both corners pinned, left column pinned, EOH pinned to the inner
+right edge (10px in, which is the scrollbar and correct), capacity window pinned to the
+bottom, and the lines correctly drawn under the header rather than across the tick labels.
+
+**Four bugs found by measurement, each a real defect:**
+- **The overlay corrupted the whole grid.** It was an explicitly-placed grid item at
+  `grid-column: 2; grid-row: 1 / -1`, which reserves that column in EVERY row — so the
+  auto-placed cells flowed around it and each row shifted one slot: row 1's identity
+  block landed in the EOH column, the timeline header spilled into a phantom fourth
+  column, and the content measured **3,954px instead of 2,256px** with all seven rows
+  reporting misaligned. The overlay and the footbar now live in a `.gtt-stage` wrapper
+  outside the grid.
+- **The drag handle scrolled out of view.** It sat in the content-space overlay while the
+  header rail it runs in is sticky, so scrolling the rows 240px left the grip 200px above
+  the scrollport. The two markers are now split by which thing they belong to: the LINES
+  stay in content space and run down the rows; the Today chip and the grip are children
+  of the **sticky header**. That also fixed the paint order — the overlay dropped to
+  z-index 2, above the bars but below the frozen columns (3) and the header (4).
+- **The Outgoing column was invisible in dark mode**, 1.81:1. Rewriting the stylesheet
+  dropped the previous `[data-theme='dark']` override, leaving `--brand-red-darker`
+  (#8f1a1c) on a near-black card. Now a `--gtt-ink-out` token alongside `--gtt-ink-in`:
+  the deep red in light (9.0:1), the pale end of the same family in dark (10.0:1).
+- **The EOH header's 8px date** measured 4.31:1 in light — `--text-faint` clears 4.5 on
+  white but not on the header's own `--surface-2` tint. One step up gives 6.55:1.
+
+**Verified** at 1440x900 and 375x812, light and dark. Requirement by requirement: no
+`.gc-code` cells; row heights uniform at 44 in Both and 22 in In and Out with one lane
+each; no `.gd-sub`/`.gd-path`; 7 collapsed rows and 4 carets opening to 17; the toggle
+reads Both / In / Out. Across all four granularities and both themes: **zero bars
+escaping their lane, zero clipped inside labels, zero label-or-bar overlaps on a track,
+zero misaligned rows, no page-level horizontal scroll.** Drag exercised one action per
+call (React batches, so a dispatch and a read in the same script always report the
+pre-click DOM — that trap cost a false "the drag is broken" reading this session too):
+the line, the grip and the capacity window all travel together, capacity moved 1,691 →
+2,433 m², and releasing outside the window clears the drag so stray moves no longer pull
+the line. Contrast audited element by element after fixing the helper to **composite
+alpha** — treating a `color-mix(..., transparent)` wash as opaque had reported a false
+2.13:1 on the project-count chip, which is really 5.44:1. Both themes now show **zero
+failures**, minimum 4.89:1 dark and 4.65:1 light. Both empty states still render the
+right message, "Expand all" hides when nothing is expandable, and the Table view is
+untouched at 27 rows and 9 columns. No console errors. `npm run build` passes; `dist/`
+carries no item code, price, bin location or document reference.
+
+**Unchanged and still true:** there is no outbound schedule anywhere in this system, so
+the out lane is empty right of today on every row — in Out mode 12 of 17 rows are
+correctly empty and no scheduled bar exists at all. `UNITS_PER_PALLET` in
+`deliveryGantt.js` is still the provisional table for the warehouse team to correct.

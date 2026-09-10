@@ -25,14 +25,11 @@ import '../styles/gantt.css'
 // quantity, the members in its tooltip — which is honest and reads better than a
 // pile-up. See packTrack.
 const LANE_H = 22
-const BAR_H = 13
+// 16 of the lane's 22px. Every bar is now one style, so there is no thin inset bar to
+// leave room for and the lane can be used properly — but LANE_H stays at 22 on purpose,
+// because the row height is what keeps the whole chart inside the display.
+const BAR_H = 16
 const BAR_TOP = Math.round((LANE_H - BAR_H) / 2)
-// The recorded bar is drawn thinner and centred INSIDE the planned bar's height rather
-// than beside it, so a delivery that lands exactly on its target date still shows the
-// plan's outline above and below it. On one shared track that is the only way both stay
-// visible, and it is the usual baseline-vs-actual convention besides.
-const ACT_H = 7
-const ACT_TOP = Math.round((LANE_H - ACT_H) / 2)
 
 // MIN_BAR is what a bar needs to be seen and hovered, not what its number needs — the
 // number sits outside when the bar is too small to hold it.
@@ -66,14 +63,29 @@ export const LANE_MODES = [
 ]
 
 // ---------------------------------------------------------------------------
-// BAR PACKING — one track, merging what collides.
+// BAR PACKING — one track per lane, merging what collides.
+//
+// Scheduled and recorded deliveries share ONE track and ONE style now. The chart used
+// to draw them differently — an outlined "planned" bar with a thinner filled "recorded"
+// bar inside it — but the delivery schedule carries no actual-vs-planned pairing, so
+// that distinction was asserting a status the data does not record. What the bars carry
+// instead is DIRECTION by colour and ELAPSED-OR-NOT by opacity.
+//
+// The source kind still exists in the data and still shapes each bar's tooltip; it just
+// no longer changes how the bar looks.
+
+// End of today. A bar whose span has fully elapsed by this instant is drawn solid; one
+// that has not is drawn washed out. A delivery dated today counts as elapsed, which is
+// why this is the END of the day and not its start.
+const TODAY_EDGE = cursorEdge(TODAY)
+const isPast = (end) => end.getTime() <= TODAY_EDGE
 
 const sumQty = (members) => {
   const known = members.filter((m) => m.qty != null)
   return { qty: known.length ? known.reduce((a, m) => a + m.qty, 0) : null, tbc: members.length - known.length }
 }
 
-function makeItem(members, scale, side, forceOutside) {
+function makeItem(members, scale, totalW) {
   const start = new Date(Math.min(...members.map((m) => m.start.getTime())))
   const end = new Date(Math.max(...members.map((m) => m.end.getTime())))
   const x0 = scale(start.getTime())
@@ -87,29 +99,37 @@ function makeItem(members, scale, side, forceOutside) {
   const { qty, tbc } = sumQty(members)
   const label = qty == null ? 'TBC' : num(qty)
   const lw = labelWidth(label)
-  // A recorded bar is only ACT_H tall, so a 9.5px number can never sit inside it.
-  const inside = !forceOutside && w >= lw + 4
-  // Outside labels prefer their own side — recorded to the left, scheduled to the
-  // right — so a delivery drawn on top of the plan it fulfils does not put two numbers
-  // in the same place. A label that would fall off the left edge flips.
-  const leftSide = side === 'left' && x - lw - 4 >= 0
+  const inside = w >= lw + 4
+  // Outside labels go to the right, and flip left only when the right would run past
+  // the end of the timeline — which would widen the scrollable content past the last
+  // column for the sake of one number.
+  const leftSide = !inside && x + w + lw + 4 > totalW && x - lw - 4 >= 0
   const left = inside ? x : (leftSide ? x - lw - 4 : x)
   const right = inside ? x + w : (leftSide ? x + w : x + w + lw + 4)
-  return { members, start, end, x, w, trueW, stretched: trueW < MIN_BAR, qty, tbcCount: tbc, label, inside, leftSide, left, right }
+  return {
+    members, start, end, x, w, trueW, stretched: trueW < MIN_BAR,
+    qty, tbcCount: tbc, label, inside, leftSide, left, right,
+    past: isPast(end),
+  }
 }
 
-// Lay bars on ONE track, merging any that would touch (their labels counted). Repeats
-// until nothing merges, because a merge widens the label and can create a new overlap.
-function packTrack(bars, scale, side, forceOutside) {
+// Lay a lane's bars on ONE track, merging any that would touch (their labels counted).
+// Repeats until nothing merges, because a merge widens the label and can open a new
+// overlap.
+//
+// Two bars are never merged ACROSS the today line. Opacity is what tells elapsed from
+// scheduled, so a merged bar has to be wholly one or the other or it could not be drawn
+// truthfully — and the line is a real boundary in the reader's head, not a tick.
+function packTrack(bars, scale, totalW) {
   if (!bars.length) return []
-  let items = bars.map((b) => makeItem([b], scale, side, forceOutside)).sort((a, b) => a.left - b.left)
+  let items = bars.map((b) => makeItem([b], scale, totalW)).sort((a, b) => a.left - b.left)
   for (let guard = 0; guard < 50; guard++) {
     const out = []
     let merged = false
     for (const it of items) {
       const prev = out[out.length - 1]
-      if (prev && it.left < prev.right + 3) {
-        out[out.length - 1] = makeItem([...prev.members, ...it.members], scale, side, forceOutside)
+      if (prev && prev.past === it.past && it.left < prev.right + 3) {
+        out[out.length - 1] = makeItem([...prev.members, ...it.members], scale, totalW)
         merged = true
       } else out.push(it)
     }
@@ -119,40 +139,45 @@ function packTrack(bars, scale, side, forceOutside) {
   return items
 }
 
-function layoutRow(row, scale, mode) {
+function layoutRow(row, scale, mode, totalW) {
   const showIn = mode !== 'out'
   const showOut = mode !== 'in'
+  // row.inBars is already the recorded receipts plus the dated schedule; row.outBars the
+  // recorded pullouts. One track each, since the two kinds now look the same and putting
+  // them on separate tracks would only let them overlap invisibly.
   return {
-    planned: showIn ? packTrack(row.planned.filter((p) => p.start), scale, 'right', false) : [],
-    actualIn: showIn ? packTrack(row.actualIn, scale, 'left', true) : [],
-    actualOut: showOut ? packTrack(row.actualOut, scale, 'left', true) : [],
+    inItems: showIn ? packTrack(row.inBars, scale, totalW) : [],
+    outItems: showOut ? packTrack(row.outBars, scale, totalW) : [],
     showIn, showOut,
   }
 }
 
 // ---------------------------------------------------------------------------
 
-function itemTitle(item, row, kind) {
-  const head = kind === 'planned'
-    ? `${item.members.length > 1 ? `${item.members.length} scheduled deliveries` : item.members[0].label || 'Batch'} — ${row.materialName}`
-    : `${item.members.length > 1 ? `${item.members.length} recorded deliveries` : 'Delivery'} — ${row.materialName}`
-  const lines = [head]
+function itemTitle(item, row) {
+  const n = item.members.length
+  const kinds = new Set(item.members.map((m) => m.kind))
+  const what = n > 1
+    ? `${n} deliveries${kinds.size > 1 ? '' : kinds.has('planned') ? ' scheduled' : ' recorded'}`
+    : (item.members[0].kind === 'planned' ? item.members[0].label || 'Scheduled delivery' : 'Recorded delivery')
+  const lines = [`${what} — ${row.materialName}`]
 
   if (item.qty != null) lines.push(`${num(item.qty)} ${row.uom || ''}`.trim())
   if (item.tbcCount) lines.push(`${item.tbcCount} of these carry no agreed quantity (TBC in the source) and are not counted.`)
+  lines.push(item.past ? 'On or before today — drawn solid.' : 'Still ahead — drawn faded.')
   lines.push('')
 
   for (const m of item.members.slice(0, 8)) {
-    if (kind === 'planned') {
+    if (m.kind === 'planned') {
       const when = m.targetDate
         ? `${fmtDate(new Date(`${m.targetDate}T00:00:00`))} (firm)`
         : `${fmtTargetText(m.targetText) || 'TBC'} — an estimate, so the bar spans the window the source commits to`
       const extra = [m.location ? fmtTower(m.location) : '', m.dpPayment ? `DP ${m.dpPayment}` : ''].filter(Boolean).join(' · ')
-      lines.push(`${m.batch || 'Batch'} · ${when} · ${m.qty == null ? 'TBC' : num(m.qty)}${extra ? ` · ${extra}` : ''}`)
+      lines.push(`Scheduled · ${m.batch || 'Batch'} · ${when} · ${m.qty == null ? 'TBC' : num(m.qty)}${extra ? ` · ${extra}` : ''}`)
       if (m.opsRemarks) lines.push(`    Ops: ${m.opsRemarks}`)
       if (m.prcRemarks) lines.push(`    PRC: ${m.prcRemarks}`)
     } else {
-      lines.push(`${fmtDate(m.start)} · ${num(m.qty)}${m.docRef ? ` · ${m.docRef}` : ''}`)
+      lines.push(`Recorded · ${fmtDate(m.start)} · ${num(m.qty)}${m.docRef ? ` · ${m.docRef}` : ''}`)
     }
   }
   if (item.members.length > 8) lines.push(`… and ${item.members.length - 8} more`)
@@ -160,20 +185,19 @@ function itemTitle(item, row, kind) {
   return lines.join('\n')
 }
 
-function Bar({ item, row, kind, colour, top, height }) {
-  const first = item.members[0]
-  const est = kind === 'planned' && item.members.every((m) => !m.firm)
+function Bar({ item, row, colour }) {
   return (
     <span
       className={[
-        'gbar', kind === 'planned' ? 'gbar-plan' : 'gbar-act',
-        est ? 'gbar-est' : '', item.qty == null ? 'gbar-tbc' : '',
-        item.stretched ? 'is-min' : '', item.inside ? '' : 'gbar-out',
+        'gbar', item.past ? 'is-past' : 'is-future',
+        item.qty == null ? 'gbar-tbc' : '',
+        item.stretched ? 'is-min' : '',
+        item.inside ? '' : 'gbar-out',
         item.inside ? '' : (item.leftSide ? 'lbl-left' : 'lbl-right'),
         item.members.length > 1 ? 'is-merged' : '',
       ].filter(Boolean).join(' ')}
-      style={{ left: item.x, width: item.w, top, height, '--c': colour }}
-      title={itemTitle(item, row, kind)}
+      style={{ left: item.x, width: item.w, top: BAR_TOP, height: BAR_H, '--c': colour }}
+      title={itemTitle(item, row)}
     >
       <em className="gb-n">{item.label}</em>
       {item.members.length > 1 && <i className="gb-mult" aria-hidden="true">{item.members.length}</i>}
@@ -186,6 +210,15 @@ function Bar({ item, row, kind, colour, top, height }) {
 export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const { theme } = useTheme()
   const S = seriesFor(theme)
+  // DIRECTION BY COLOUR — and deliberately NOT the app's usual pairing. Movement History
+  // and the KPI tiles use orange for incoming and deep red for outgoing; this card was
+  // asked for RED incoming and ORANGE outgoing. So the in lane takes S.total (the red
+  // role) and the out lane S.incoming (the orange role): both are per-theme values from
+  // seriesFor(), so neither is a new colour and neither needs its own dark-mode tuning —
+  // only the assignment differs. The In / Out column inks follow the same swap, or the
+  // card would contradict itself between its figures and its bars.
+  const IN_C = S.total
+  const OUT_C = S.incoming
   const scrollRef = useRef(null)
   const tlHeadRef = useRef(null)
   const leftHeadRef = useRef(null)
@@ -211,7 +244,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const unscale = (x) => new Date(t0 + (Math.min(Math.max(x, 0), totalW) / totalW) * (t1 - t0))
 
   const rows = useMemo(() => visibleRows(parents, expanded), [parents, expanded])
-  const layouts = useMemo(() => rows.map((r) => layoutRow(r, scale, mode)), [rows, scale, mode])
+  const layouts = useMemo(() => rows.map((r) => layoutRow(r, scale, mode, totalW)), [rows, scale, mode, totalW])
 
   const laneCount = mode === 'both' ? 2 : 1
   const rowH = LANE_H * laneCount
@@ -324,10 +357,10 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
       {/* ------------------------------------------------------------- controls */}
       <div className="gtt-bar">
         <div className="gtt-legend" hidden={rows.length === 0}>
-          <span className="gl"><i className="gl-sw gl-plan" style={{ '--c': S.incoming }} />Scheduled</span>
-          <span className="gl"><i className="gl-sw gl-act" style={{ '--c': S.incoming }} />Received</span>
-          <span className="gl"><i className="gl-sw gl-act" style={{ '--c': S.outgoing }} />Issued</span>
-          <span className="gl"><i className="gl-sw gl-est" style={{ '--c': S.incoming }} />Estimate</span>
+          <span className="gl"><i className="gl-sw gl-solid" style={{ '--c': IN_C }} />In · to date</span>
+          <span className="gl"><i className="gl-sw gl-wash" style={{ '--c': IN_C }} />In · scheduled</span>
+          <span className="gl"><i className="gl-sw gl-solid" style={{ '--c': OUT_C }} />Out · to date</span>
+          <span className="gl"><i className="gl-sw gl-wash" style={{ '--c': OUT_C }} />Out · scheduled</span>
           <span className="gl gl-line"><i className="gl-now" />Today</span>
           <span className="gl gl-line"><i className="gl-cur" />Position line</span>
         </div>
@@ -449,19 +482,12 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                     {ticks.map((t, k) => <span key={t.key} className={`gtt-gl ${k % 2 ? 'alt' : ''}`} style={{ left: k * colWidth, width: colWidth }} />)}
                     {L.showIn && (
                       <div className="gtt-lane gtt-lane-in" style={laneStyle}>
-                        {L.planned.map((it, bi) => (
-                          <Bar key={`p${bi}`} item={it} row={r} kind="planned" colour={S.incoming} top={BAR_TOP} height={BAR_H} />
-                        ))}
-                        {L.actualIn.map((it, bi) => (
-                          <Bar key={`a${bi}`} item={it} row={r} kind="actual" colour={S.incoming} top={ACT_TOP} height={ACT_H} />
-                        ))}
+                        {L.inItems.map((it, bi) => <Bar key={`i${bi}`} item={it} row={r} colour={IN_C} />)}
                       </div>
                     )}
                     {L.showOut && (
                       <div className="gtt-lane gtt-lane-out" style={laneStyle}>
-                        {L.actualOut.map((it, bi) => (
-                          <Bar key={`o${bi}`} item={it} row={r} kind="actual" colour={S.outgoing} top={ACT_TOP} height={ACT_H} />
-                        ))}
+                        {L.outItems.map((it, bi) => <Bar key={`o${bi}`} item={it} row={r} colour={OUT_C} />)}
                       </div>
                     )}
                   </div>
@@ -525,9 +551,10 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
         <span>
           <strong>No outbound schedule exists.</strong> Nothing in the warehouse system plans a release,
           so the <em>out</em> lane shows recorded pullouts only and is empty to the right of today.
-          Bars that overlap at this zoom are merged and carry their combined quantity — a badge shows how
-          many. Quantities read <em>TBC</em> where the source has not agreed one; those are excluded from
-          every total rather than counted as zero. Floor space is a provisional estimate — hover it for the
+          A solid bar has fallen on or before today; a faded one is still ahead. Bars that overlap at this
+          zoom are merged and carry their combined quantity — a badge shows how many, and nothing is ever
+          merged across the today line. Quantities read <em>TBC</em> where the source has not agreed one;
+          those are excluded from every total rather than counted as zero. Floor space is a provisional estimate — hover it for the
           arithmetic and the pack sizes it depends on.
         </span>
       </p>

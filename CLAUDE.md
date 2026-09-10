@@ -2918,3 +2918,84 @@ carries no item code, price, bin location or document reference.
 the out lane is empty right of today on every row — in Out mode 12 of 17 rows are
 correctly empty and no scheduled bar exists at all. `UNITS_PER_PALLET` in
 `deliveryGantt.js` is still the provisional table for the warehouse team to correct.
+
+### 2026-09-10 — Session: hover paint order, and one bar style — direction by colour, elapsed by opacity
+
+**FIX — hovering a bar painted it over the frozen identity columns.** `.gbar:hover` set
+`z-index: 3` and `.gtt-left` was also `z-index: 3`. A TIE, and a tie is resolved by tree
+order: the bar sits in the timeline cell, which comes after the identity cell in the same
+grid, so the bar won and any bar scrolled under the frozen block showed straight through
+it on hover.
+
+Fixed twice over, because a bare number is too easy to break again:
+- Every timeline cell is now its OWN stacking context (`.gtt-row { z-index: 0 }`), so a
+  bar's z-index is confined to its row and cannot compete with anything outside it.
+- The whole scale is restated in one comment block beside `.gtt-left`, with gaps:
+  row 0 · overlay 3 · columns 4 · header 5 · corners 6 · footbar 7.
+
+**Verified by hit-test with a negative control, which is what made it trustworthy.** With
+the hover z-index forced on all 19 bars that overlap the frozen column,
+`elementFromPoint` returns the identity column every time. Then the shipped state was
+reconstructed in the page (`.gtt-row{z-index:auto} .gtt-left{z-index:3} .gbar{z-index:3}`)
+and all 6 sampled bars came out on top — so the check does detect the bug it claims to
+have fixed. An earlier attempt at this control reported a false pass, because it set the
+bar to 3 against a column already raised to 4; a control has to reproduce the ORIGINAL
+numbers, not just perturb the new ones.
+
+**One bar style now. Colour is direction, fill strength is elapsed-or-not.**
+
+Gone: the outlined "planned" bar with a thinner filled "recorded" bar inside it, and the
+dashed edge for a date that was only an estimate. The schedule carries no
+actual-versus-planned pairing, so that distinction was asserting a status the data does
+not record, and the dashed edge was a third variable on a 16px bar. The source kind still
+exists in the data and still shapes each bar's tooltip — it just no longer changes how the
+bar looks. Scheduled and recorded therefore share ONE track per lane, since keeping them
+apart would only have let identical-looking bars overlap invisibly.
+
+| | |
+|---|---|
+| Incoming | red — `S.total`, measured `rgb(238,49,36)` |
+| Outgoing | orange — `S.incoming`, measured `rgb(184,95,19)` |
+| On or before today | solid fill |
+| Still ahead | same colour washed back over the card |
+| Bar height | 13px → **16px** in an unchanged 22px lane |
+
+**The colour pairing is deliberately the reverse of the rest of the app** — Movement
+History and the KPI tiles use orange for incoming and deep red for outgoing. Both values
+still come from `seriesFor()`, so nothing new was invented and no dark-mode tuning was
+needed; only the assignment differs. The In / Out column inks swapped with them
+(`--gtt-ink-in` / `--gtt-ink-out`), because a card whose figures said orange-is-incoming
+while its bars said red-is-incoming would be contradicting itself. **If the app-wide
+convention should follow, that is a separate change to `lib/colors.js`.**
+
+**Nothing is merged across the today line.** Opacity is what separates elapsed from
+scheduled, so a merged bar has to be wholly one or the other or it could not be drawn
+truthfully. `packTrack` refuses a merge when the two sides disagree. Verified from the
+rendered tooltips: 17 merged bars, every bar's class matching its own tooltip's state
+line, and **zero merged bars whose member dates straddle 2026-09-07**.
+
+**Two real regressions, both found by measurement rather than by looking:**
+- **All three TBC bars lost their hatch.** The new `.gbar.is-past` / `.is-future` rules set
+  the `background` SHORTHAND, which resets `background-image` — and at two-class
+  specificity, so `.gbar-tbc { background-image }` lost to them. The hatch is a `::after`
+  overlay now, which no shorthand can reach, and it is drawn in `--text` rather than the
+  bar's own colour so it reads on a solid fill and a washed one alike.
+- **White numbers inside a solid bar failed AA**: 4.12:1 on brand red and 4.48:1 on
+  `--orange`, against the 4.5 that 9.5px type needs. The SOLID fill is now the direction's
+  colour taken 18% toward black, which lifts them to 5.76 and 6.16 while the border and
+  the washed future fill keep the bright requested hue — so the bar still reads as red or
+  orange. Dark mode is exempt and says so: there the fill is already the pale end of the
+  family and the number is near-black, clearing 5.45.
+  The outside-label rule also had to be restated as `.gbar.gbar-out .gb-n` — at one class
+  it lost to `.gbar.is-past` and would have painted an outside number white on the row.
+
+**Verified** at 1440x900, light and dark, across Month and Day and all three lane modes.
+Every pass: bar height a uniform 16, row height 44 in Both and 22 in In / Out, **zero
+dashed bars, zero bars escaping their lane, zero clipped inside labels, zero label-or-bar
+overlaps on a track, zero misaligned rows, no page-level horizontal scroll**, and
+`bars sum to the In / Out column` still PASS on all 17 rows. Past/future is geometrically
+consistent with the line: no solid bar lies entirely right of it and no washed bar
+entirely left of it. Out mode draws 21 bars, all of them solid and none scheduled — which
+is correct, and the same fact the card's own footnote states. Contrast audited on every
+new pair in both themes: **zero failures**, minimum 5.04 light and 5.44 dark. Empty state
+and console still clean. `npm run build` passes.

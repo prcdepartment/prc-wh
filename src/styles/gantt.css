@@ -40,26 +40,28 @@
 
   --gtt-lane: 22px;
 
-  /* Two module-scoped inks. This card prints the incoming role and the "today" marker
-     at 9-12px, and the shared palette values fall just short of AA at that size on
-     white: --orange (#b85f13) measures 4.48:1 and white-on---accent 4.12:1, against 4.5
-     needed. Same hues, darkened only as far as the ratio requires, and for TEXT only —
-     bar fills, the dashed line and the legend swatches keep the palette colours, which
-     are graphics and clear the 3:1 they need. --gtt-ink-in is the value Movement
-     History already uses for this role (MOVEMENT_LIGHT.incoming in lib/colors.js). */
-  --gtt-ink-in: #8c460b;                 /* 7.0:1 on white */
-  --gtt-ink-out: var(--brand-red-darker); /* 9.0:1 on white */
+  /* Module-scoped INKS, for text only, and they follow the bars. This card colours the
+     IN direction red and the OUT direction orange (IN_C / OUT_C in DeliveryGantt.jsx) —
+     the reverse of the app's usual incoming-is-orange pairing — so the In / Out column
+     figures have to swap with them, or the card would say one thing in its numbers and
+     another in its chart.
+     A separate ink is needed at all because the palette's graphic values fall short of
+     AA as 9-12px type: brand red is 3.5:1 on white and --orange 4.48:1, against the 4.5
+     needed. Bar fills and legend swatches keep the palette colours, which are graphics
+     and clear the 3:1 they need. */
+  --gtt-ink-in: var(--brand-red-dark);   /* red, 5.8:1 on white */
+  --gtt-ink-out: #8c460b;                /* orange, 7.0:1 on white — the value Movement
+                                            History already uses for this hue */
   --gtt-now-ink: var(--brand-red-dark);  /* white on it = 5.8:1 */
 }
 
 [data-theme='dark'] .gtt-root {
-  /* The dark set already clears AA comfortably (8.7 and 5.5 measured), so these point
-     back at the palette rather than carrying a second set of overrides. */
-  --gtt-ink-in: var(--orange-soft);
-  /* The outgoing role's LIGHT value is --brand-red-darker (#8f1a1c), which on the dark
-     theme's near-black card measures 1.81:1 — effectively invisible. It needs the pale
-     end of the same family, not the deep end. */
-  --gtt-ink-out: var(--brand-red-mid);
+  /* Red as TYPE on the near-black card needs the pale end of the family, not the deep
+     one: --brand-red-soft (#f4695d) is 4.3:1, which is fine for a bar FILL but short of
+     the 4.5 an 11.5px figure needs — so the ink steps one lighter than the graphic. And
+     the deep end is worse still: --brand-red-darker measures 1.81:1 here, invisible. */
+  --gtt-ink-in: var(--brand-red-mid);
+  --gtt-ink-out: var(--orange-soft);
   --gtt-now-ink: var(--accent);
 }
 
@@ -76,13 +78,12 @@
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
   color: var(--text-muted); white-space: nowrap;
 }
-.gl-sw { width: 18px; flex: 0 0 auto; border-radius: 2px; }
-/* Scheduled is an outline because it has not happened; recorded is filled. The pair
-   must read apart at a glance, since they share one track and can sit on top of each
-   other — hence also the height difference, matching the bars themselves. */
-.gl-plan { height: 11px; background: color-mix(in srgb, var(--c) 18%, transparent); border: 1.5px solid var(--c); }
-.gl-act { height: 7px; background: var(--c); }
-.gl-est { height: 11px; background: color-mix(in srgb, var(--c) 10%, transparent); border: 1.5px dashed var(--c); }
+/* Four swatches: the two directions crossed with the two states, drawn exactly as the
+   bars are. Colour carries direction, fill carries elapsed-or-not, and there is no third
+   variable — so nothing here needs a dashed or half-height variant any more. */
+.gl-sw { width: 18px; height: 11px; flex: 0 0 auto; border-radius: 2px; box-sizing: border-box; border: 1.5px solid var(--c); }
+.gl-solid { background: var(--c); }
+.gl-wash { background: color-mix(in srgb, var(--c) 15%, var(--surface)); }
 .gl-now { width: 0; height: 12px; border-left: 2px dashed var(--accent); flex: 0 0 auto; }
 .gl-cur { width: 0; height: 12px; border-left: 2px solid var(--text); flex: 0 0 auto; }
 
@@ -121,8 +122,17 @@
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
-/* frozen columns */
-.gtt-left, .gtt-right { z-index: 3; background: var(--surface); }
+/* PAINT ORDER, stated once. Bars are sealed inside their own row (see .gtt-row), so the
+   only thing that has to hold out here is: overlay lines above the chart, frozen chrome
+   above the lines.
+       row + its bars   0   own stacking context — nothing inside can escape
+       overlay          3   the two lines, over the bars
+       columns          4   a line is clipped by the identity block, never drawn on it
+       header           5   nor across the tick labels
+       corners          6
+       footbar          7
+   frozen columns */
+.gtt-left, .gtt-right { z-index: 4; background: var(--surface); }
 .gtt-left { position: sticky; left: 0; }
 .gtt-right { position: sticky; right: 0; }
 .gtt-left::after, .gtt-right::after {
@@ -134,7 +144,7 @@
 
 /* frozen header row */
 .gtt-head {
-  position: sticky; top: 0; z-index: 4;
+  position: sticky; top: 0; z-index: 5;
   background: var(--surface-2);
   box-shadow: inset 0 -1px 0 var(--border-strong);
   font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
@@ -227,7 +237,13 @@
 }
 
 /* ------------------------------------------------------------------ rows + bars */
-.gtt-row { display: flex; flex-direction: column; }
+/* z-index 0 makes every timeline cell its OWN stacking context, and that is what stops a
+   hovered bar escaping the chart. A bar lifts itself on hover so it reads above its
+   neighbours; with the row transparent to stacking that z-index competed directly with
+   the sticky identity column and — being later in the DOM — won, so hovering a bar near
+   the left edge painted it straight over the frozen Material / BOH / In / Out block.
+   Sealed here, a bar can raise itself as much as it likes and still never leave its row. */
+.gtt-row { display: flex; flex-direction: column; z-index: 0; }
 .gtt-gl { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); pointer-events: none; }
 .gtt-gl.alt { background: color-mix(in srgb, var(--text) 2%, transparent); }
 
@@ -235,54 +251,75 @@
 /* Inset, not a border: the lane heights add up to the fixed row height exactly. */
 .gtt-lane-out { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent); }
 
+/* ONE bar style. Colour is the DIRECTION (red in, orange out — IN_C / OUT_C in the
+   component); fill strength is whether the span has ELAPSED. Nothing else.
+   There used to be a second treatment — an outlined "planned" bar with a thinner filled
+   "recorded" bar inside it, plus a dashed variant for a date that was only an estimate.
+   All of it is gone: the delivery schedule records no actual-vs-planned pairing, so the
+   distinction was asserting a status the data does not hold, and the dashed edge was a
+   third variable on a 16px bar. */
 .gbar {
   position: absolute; box-sizing: border-box; border-radius: 3px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; cursor: default;
+  border: 1.5px solid var(--c);
   transition: filter 0.12s ease, box-shadow 0.12s ease;
 }
-.gbar:hover { filter: brightness(1.07); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 38%, transparent); z-index: 3; }
+/* z-index 2 is safe ONLY because .gtt-row seals each cell into its own stacking context
+   — see the note there. Unsealed, this number escaped the chart and painted a hovered
+   bar over the frozen identity columns. */
+.gbar:hover { filter: brightness(1.07); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 38%, transparent); z-index: 2; }
 
-/* Scheduled — an outline with a light wash. Not filled: a solid bar for a promise
-   reads as a fact. */
-.gbar-plan { border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
-/* An estimate rather than a firm date: dashed, because the bar's WIDTH is the window
-   the source committed to, not a delivery that takes that long. */
-.gbar-est { border-style: dashed; background: color-mix(in srgb, var(--c) 9%, var(--surface)); }
-.gbar-tbc { background-image: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--c) 22%, transparent) 4px 8px); }
-
-/* Recorded — solid and thinner, drawn INSIDE the scheduled bar's height (see ACT_H in
-   the component) so a delivery landing on its target date still leaves the plan's
-   outline showing above and below it. */
-.gbar-act {
-  z-index: 2;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--c) 88%, white) 0%,
-    var(--c) 60%,
-    color-mix(in srgb, var(--c) 84%, black) 100%);
-  border: 1px solid color-mix(in srgb, var(--c) 70%, black);
+/* On or before today: full strength, because it happened.
+   The fill is the direction's colour taken 18% toward black, and that is a CONTRAST
+   requirement rather than a style: a number inside a solid bar is white, and white
+   measures only 4.12:1 on brand red and 4.48:1 on --orange, both short of the 4.5 that
+   9.5px type needs. Deepening the fill alone takes them to 5.8 and 6.2 while the BORDER
+   and the washed future fill keep the bright hue, so the bar still reads as red or
+   orange and the pair still read as one family. Dark mode is exempt: there the fill is
+   already the pale end of the family and the number is near-black, which clears 5.5. */
+.gbar.is-past { background: color-mix(in srgb, var(--c) 82%, black); }
+[data-theme='dark'] .gbar.is-past { background: var(--c); }
+/* Still ahead: the same colour washed back over the card, so a scheduled delivery reads
+   as a promise rather than a fact — and the pair never needs a second hue to separate. */
+.gbar.is-future { background: color-mix(in srgb, var(--c) 15%, var(--surface)); }
+/* No agreed quantity in the source. The hatch is the one texture left on a bar, and it
+   is an OVERLAY rather than a background-image: the two state rules above set the
+   `background` SHORTHAND, which resets background-image — at two-class specificity, so a
+   `.gbar-tbc { background-image }` declaration loses to them and the hatch vanished from
+   all three TBC bars. A pseudo-element cannot be clobbered that way.
+   The hatch is drawn in --text, not the bar's own colour, so it reads on a solid fill and
+   on a washed one alike. */
+.gbar-tbc::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(135deg,
+    transparent 0 3px, color-mix(in srgb, var(--text) 26%, transparent) 3px 6px);
 }
 
 .gb-n {
   font-style: normal; font-size: 9.5px; font-weight: 800;
   font-variant-numeric: tabular-nums; white-space: nowrap; padding: 0 3px;
 }
-.gbar-plan .gb-n { color: color-mix(in srgb, var(--c) 72%, var(--text)); }
-.gbar-act .gb-n { color: var(--white); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+/* Inside a solid bar the number sits on the direction's own colour, so it takes the
+   opposite end of the scale; inside a washed one it sits on the card. */
+.gbar.is-past .gb-n { color: var(--white); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+[data-theme='dark'] .gbar.is-past .gb-n { color: var(--brand-black); text-shadow: none; }
+.gbar.is-future .gb-n { color: color-mix(in srgb, var(--c) 72%, var(--text)); }
 
 /* A bar too small for its own number puts the number just outside it — which is what
-   lets the bar be sized for the DATE instead of for the text. Recorded bars always take
-   this path: at 7px tall they could never hold 9.5px type. packTrack() reserves the
-   room, so the next bar along cannot land on it. */
+   lets the bar be sized for the DATE instead of for the text. packTrack() reserves the
+   room, so the next bar along cannot land on it.
+   Written as .gbar.gbar-out, two classes, because it has to OUTRANK .gbar.is-past — a
+   one-class selector would lose to it and paint this label white on the row. */
 .gbar-out { overflow: visible; }
-.gbar-out .gb-n {
+.gbar.gbar-out .gb-n {
   position: absolute; top: 50%; transform: translateY(-50%);
   color: color-mix(in srgb, var(--c) 78%, var(--text));
   text-shadow: none; padding: 0;
 }
 .gbar-out.lbl-right .gb-n { left: 100%; margin-left: 4px; }
 .gbar-out.lbl-left .gb-n { right: 100%; margin-right: 4px; }
-[data-theme='dark'] .gbar-out .gb-n { color: color-mix(in srgb, var(--c) 84%, var(--text)); }
+[data-theme='dark'] .gbar.gbar-out .gb-n { color: color-mix(in srgb, var(--c) 84%, var(--text)); }
 
 /* One bar standing for several. The badge is the only cue that a quantity is a sum, and
    without it a merged bar silently misreports how many deliveries there are. */
@@ -302,12 +339,12 @@
 /* The lines span every row of the timeline column and scroll with the bars, so they
    stay pinned to a DATE. Click-through except for their own controls, or the bars
    underneath would lose their hover tooltips. */
-/* z-index 2 is deliberate and load-bearing: above the bars (z-index auto, so the lines
-   read over the chart) but BELOW the frozen columns at 3 and the sticky header at 4, so
-   a line is clipped by the identity columns and never drawn across the tick labels. */
+/* Above the bars so the lines read over the chart, below the frozen columns and the
+   header so a line is clipped by the identity block and never drawn across a tick
+   label. See the scale beside .gtt-left. */
 .gtt-overlay {
   position: absolute; top: 0; left: var(--gtt-left);
-  z-index: 2; pointer-events: none;
+  z-index: 3; pointer-events: none;
 }
 
 .gtt-now { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent); }

@@ -63,7 +63,6 @@
 
 import { deliveryRows } from './deliveryTracker'
 import { soh, incoming, outgoing } from './safekeeping'
-import { TODAY } from '../lib/format'
 
 // ---------------------------------------------------------------------------
 // Project bridge. The tracker's own sheet code is the only stable key the two sides
@@ -84,6 +83,27 @@ export const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDa
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1)
 const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1)
+
+// ---------------------------------------------------------------------------
+// THE TODAY LINE IS THE REAL CURRENT DATE, deliberately NOT the snapshot date.
+//
+// `TODAY` in lib/format.js is the stock snapshot and must stay that way: the ledger
+// back-cast, the aging bands and every figure on Analytics are measured in days before
+// it, so moving it would silently re-date all of them. But a delivery schedule is read
+// against the real calendar — "is that batch late?" is a question about today, not
+// about when the stock file was exported — so this card asks the clock instead.
+//
+// A function, not a module constant: a constant is evaluated once when the bundle
+// loads and would be stale for anyone who leaves the tab open overnight. The component
+// memoises it per mount and re-arms itself at midnight.
+export const ganttToday = () => startOfDay(new Date())
+
+// How far the recorded side lags the real today. The safekeeping sheets are a snapshot,
+// so between that date and now the chart has no receipts or pullouts to show — and an
+// empty stretch left of the today line must read as "not yet exported", never as
+// "nothing moved". The card prints this.
+export const snapshotLag = (snapshot, now = ganttToday()) =>
+  Math.max(0, Math.round((startOfDay(now) - startOfDay(snapshot)) / DAY))
 
 // ---------------------------------------------------------------------------
 // QUANTITY. The sheet's Qty column is free text: a plain number on most rows, "TBC"
@@ -215,6 +235,42 @@ export const unitsPerPallet = (materialName, uom) =>
   || DEFAULT_UNITS_PER_PALLET
 
 // ---------------------------------------------------------------------------
+// MINIMUM STOCK LEVEL — the buffer the warehouse should not go below.
+//
+// NOTHING IN ANY SOURCE RECORDS ONE. Searched for it before building the column:
+// zero matches for "minimum", "min stock", "reorder", "safety stock", "buffer" or
+// "par level" anywhere in the 2026-09-10 delivery workbook, and no min-like header on
+// any of the seven sheets of the 2026-09-07 stock workbook either. So the column is
+// real, it is fed from here, and it is EMPTY — every row shows an em dash and says why
+// in its tooltip.
+//
+// There is a number called `minLevel` on every inventory line and it must NOT be used
+// for this. It is synthesized by the importer (`1 + Math.floor(rnd() * 20)`), so
+// wiring it in would print an invented reorder point on a procurement card, which is
+// precisely the class of fabrication this app has spent several sessions removing.
+// A dash that says "not recorded" is worth more than a number that is not true.
+//
+// TO FILL IT IN: add entries below, keyed by the material name MATERIAL_MAP produces
+// (Rebar Coupler & Accessories, Wooden Door, Plumbing Fixtures, Aluminum, Kitchen
+// Cabinet, Sealant, SPC Flooring, Wiring Devices, Wires & Cables, IMC Pipe, Genset).
+// A number here is read as units in that material's own UOM. Per-project levels can be
+// keyed 'Material|PROJECTCODE' and take precedence; that is why the lookup takes both.
+const MIN_STOCK_LEVEL = {
+  // 'Rebar Coupler & Accessories': 0,
+}
+
+export const minStockLevel = (materialName, projectCode) => {
+  const scoped = MIN_STOCK_LEVEL[`${materialName}|${projectCode || ''}`]
+  if (Number.isFinite(scoped)) return scoped
+  const general = MIN_STOCK_LEVEL[materialName]
+  return Number.isFinite(general) ? general : null
+}
+
+// True while the table is empty, so the card can state the gap once in its footnote
+// instead of repeating it on seventeen rows.
+export const hasMinStockData = Object.keys(MIN_STOCK_LEVEL).length > 0
+
+// ---------------------------------------------------------------------------
 // BAR CONSTRUCTION
 
 const norm = (s) => String(s || '').toLowerCase()
@@ -290,27 +346,73 @@ function buildLeafRows() {
         trade: d.trade,
         uom: '',
         planned: [],
+        // Batch accumulator, keyed so every line item of one delivery lands on one
+        // bar. Deleted in finalise() — it is scratch, and leaving a Map on the row
+        // would ride into every memo dependency and tooltip that spreads the row.
+        batches: new Map(),
         codes: [],
         boh: 0,
         sohLines: 0,
       }
       byKey.set(key, row)
     }
+    // ONE PLANNED BAR PER BATCH, not per line item — and with the 2026-09-10 workbook
+    // that distinction is the difference between a readable chart and an unreadable
+    // one. The previous sheet was already flat at batch grain (27 rows). This one is
+    // hierarchical and gives its line items: JABS' wooden doors alone are 28 rows that
+    // are really 7 deliveries, four door types each. The batch is what carries the
+    // target date, the tower and the remarks; the line items are what is inside it.
+    //
+    // So a bar is a batch, its quantity is the SUM of its line items, and the line
+    // items ride along as `lines` for the tooltip. Summing here rather than letting
+    // packTrack merge them keeps the merge badge meaning what it says: "these are
+    // separate deliveries drawn on top of each other at this zoom", not "this is one
+    // delivery that was always one thing".
     const q = parseQty(d.qty)
     const span = targetSpan(d)
-    row.planned.push({
-      kind: 'planned', lane: 'in',
-      start: span ? span.start : null,
-      end: span ? span.end : null,
-      precision: span ? span.precision : 'none',
-      firm: span ? span.firm : false,
-      qty: q.value, tbc: q.tbc, qtyRaw: q.raw, product: q.product || null,
-      label: d.batch || 'Batch', batch: d.batch, no: d.no,
-      uom: d.uom && d.uom !== 'TBC' ? d.uom : '',
-      status: d.status, location: d.location,
-      opsRemarks: d.opsRemarks, prcRemarks: d.prcRemarks, dpPayment: d.dpPayment,
-      targetText: d.targetText, targetDate: d.targetDate,
+    // Keyed on the SOURCE item string, not the mapped material name. Two source
+    // strings can share one material — the two sealants both map to Sealant, as the
+    // two AGW suppliers both map to Aluminum — and without `d.item` in the key an
+    // interior and an exterior sealant batch falling on the same date in the same
+    // project would fuse into a single bar, summing two different products under one
+    // brand. They stay separate bars; if they overlap on screen, packTrack merges them
+    // for drawing and says so with its badge, which is the honest version.
+    const bkey = `${d.item}|${d.batch || ''}|${d.targetDate || ''}|${d.targetText || ''}|${d.location || ''}`
+    let bar = row.batches.get(bkey)
+    if (!bar) {
+      bar = {
+        kind: 'planned', lane: 'in',
+        start: span ? span.start : null,
+        end: span ? span.end : null,
+        precision: span ? span.precision : 'none',
+        firm: span ? span.firm : false,
+        qty: null, tbc: true, qtyRaw: '', product: null,
+        label: d.batch || 'Batch', batch: d.batch, no: d.no,
+        // The source item and its brand ride on the bar so a tooltip can name which
+        // product this batch is, on a row whose title is the shared material name.
+        sourceItem: d.item, brand: d.brand || '',
+        uom: d.uom && d.uom !== 'TBC' ? d.uom : '',
+        status: d.status, location: d.location,
+        opsRemarks: d.opsRemarks, prcRemarks: d.prcRemarks, dpPayment: d.dpPayment,
+        targetText: d.targetText, targetDate: d.targetDate,
+        lines: [],
+      }
+      row.batches.set(bkey, bar)
+      row.planned.push(bar)
+    }
+    bar.lines.push({
+      no: d.no,
+      designation: d.designation || '',
+      description2: d.description2 || '',
+      qty: q.value, qtyRaw: q.raw, tbc: q.tbc, uom: d.uom || '',
     })
+    // A batch's quantity is the sum of the line items that HAVE one. It stays null —
+    // and the bar stays TBC — only while none of them does, so a batch with three
+    // priced lines and one blank still reports the three rather than nothing.
+    if (q.value != null) bar.qty = (bar.qty || 0) + q.value
+    bar.tbc = bar.qty == null
+    if (!bar.uom && d.uom && d.uom !== 'TBC') bar.uom = d.uom
+    if (!bar.status && d.status) bar.status = d.status
     if (!row.uom && d.uom && d.uom !== 'TBC') row.uom = d.uom
   }
 
@@ -398,11 +500,23 @@ export function buildGanttRows(keepLeaf) {
     p.totalOut = sum((c) => c.totalOut)
     p.tbcIn = sum((c) => c.tbcIn)
     p.tbcOut = sum((c) => c.tbcOut)
+    p.undatedIn = sum((c) => c.undatedIn)
+    p.undatedInCount = sum((c) => c.undatedInCount)
+    p.tbcUndated = sum((c) => c.tbcUndated)
     p.eoh = p.boh + p.totalIn - p.totalOut
     p.sheetSoh = sum((c) => c.sheetSoh)
     p.recordedIn = sum((c) => c.recordedIn)
     p.recordedOut = sum((c) => c.recordedOut)
     p.bohAdjusted = p.children.some((c) => c.bohAdjusted)
+
+    // A material's minimum is the sum of its projects' minimums — but only over the
+    // children that actually HAVE one. Summing a partial set would report a total that
+    // silently excludes the projects with no level set, which reads as a complete
+    // figure and is not one, so the parent stays null until at least one child has a
+    // level and flags whether the cover is partial.
+    const withMin = p.children.filter((c) => c.minStock != null)
+    p.minStock = withMin.length ? withMin.reduce((a, c) => a + c.minStock, 0) : null
+    p.minStockPartial = withMin.length > 0 && withMin.length < p.children.length
 
     // Concatenated, not recomputed: rowAt() and capacityAt() then give a parent exactly
     // the sum of its children at any cursor position, by construction.
@@ -443,6 +557,7 @@ export function visibleRows(parents, expanded) {
 const byStart = (a, b) => (a.start ? a.start.getTime() : Infinity) - (b.start ? b.start.getTime() : Infinity)
 
 function finalise(row) {
+  delete row.batches
   row.actualIn = row.actualIn || []
   row.actualOut = row.actualOut || []
   // Lane bar lists: recorded movement and schedule share the incoming lane.
@@ -453,11 +568,29 @@ function finalise(row) {
   const sum = (bars) => bars.reduce((a, b) => a + (b.qty || 0), 0)
   const tbc = (bars) => bars.filter((b) => b.tbc).length
 
-  // The In / Out columns ARE the sum of their lane's bars — see the header note.
-  row.totalIn = sum(row.inBars) + sum(row.noDateBars)
+  // The In / Out columns ARE the sum of their lane's DRAWN bars — see the header note.
+  //
+  // UNDATED DELIVERIES ARE EXCLUDED, and that changed on 2026-09-10. A delivery with no
+  // target at all cannot be placed on a timeline, so it draws no bar; while its quantity
+  // was still being added to the column, the column did not equal the bars on the row,
+  // which is the one invariant this card is built around. On the previous 27-row sheet
+  // that was invisible. On the 2026-09-10 workbook 70 of 355 line items carry no target,
+  // and it showed: Plumbing Fixtures read 72,998 against 26,120 drawn, and Jab's sealant
+  // read 95,234 with nothing drawn at all.
+  //
+  // So they are treated exactly as a TBC quantity already is — excluded from the total
+  // rather than counted, and reported separately so nothing goes quiet. `undatedIn` is
+  // the quantity held back and `undatedInCount` how many deliveries it covers; the card
+  // shows the count beside the figure and the tooltip gives the quantity.
+  row.totalIn = sum(row.inBars)
   row.totalOut = sum(row.outBars)
-  row.tbcIn = tbc(row.inBars) + tbc(row.noDateBars)
+  row.undatedIn = sum(row.noDateBars)
+  row.undatedInCount = row.noDateBars.length
+  row.tbcIn = tbc(row.inBars)
   row.tbcOut = tbc(row.outBars)
+  // TBC among the undated is counted once, under the undated heading — a delivery with
+  // neither a date nor a quantity must not be reported twice.
+  row.tbcUndated = tbc(row.noDateBars)
 
   // BOH is the position before the FIRST bar on this timeline, wound back off the
   // sheet's closing SOH — see the header note on why the sheet's own boh column
@@ -476,6 +609,7 @@ function finalise(row) {
   row.lastDate = all.length ? Math.max(...all.map((b) => b.end.getTime())) : null
   row.plannedCount = row.planned.length
   row.actualCount = row.actualIn.length + row.actualOut.length
+  row.minStock = minStockLevel(row.materialName, row.projectCode)
   return row
 }
 
@@ -604,7 +738,7 @@ export function timelineTicks(from, to, unit) {
 // The window the Gantt covers: every bar plus the now line, snapped out to whole
 // columns and padded by one column at each end so the first and last bar are not
 // pressed against the frame.
-export function timelineRange(rows, unit, now = TODAY) {
+export function timelineRange(rows, unit, now = ganttToday()) {
   let lo = startOfDay(now).getTime()
   let hi = addDays(startOfDay(now), 1).getTime()
   for (const row of rows) {

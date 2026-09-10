@@ -154,7 +154,16 @@ export function readWorkbook(file) {
       const rIdx = Number(rm[1] ?? rm[3]) - 1
       const body = rm[2] ?? ''
       const row = []
-      for (const cm of body.matchAll(/<c([^>]*)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      // The attribute group is LAZY, and that is load-bearing. Greedy [^>]* swallows the
+      // trailing slash of a self-closing <c r="A4" s="105"/>: the /> branch then fails,
+      // the > branch matches that same >, and the inner group runs on to the next cell
+      // that has a real </c> — absorbing every cell in between and filing its value
+      // under the EMPTY cell column. The 2026-09-10 delivery-tracker reference is
+      // written that way (Excel emits a styled empty <c/> for each cell of a formatted
+      // block), which put a shared-string INDEX into column A and moved every date one
+      // column left. Lazy tries /> before > at each length, so a self-closing cell ends
+      // where it should.
+      for (const cm of body.matchAll(/<c([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
         const attrs = cm[1]
         const inner = cm[2] ?? ''
         const ref = /r="([A-Z]+)\d+"/.exec(attrs)?.[1]

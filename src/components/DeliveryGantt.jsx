@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildGanttRows, visibleRows, timelineRange, timelineTicks, tickGroups, TICK_LABEL,
   TIMELINE_UNITS, rowAt, capacityAt, cursorEdge, startOfDay, M2_PER_POSITION,
+  ganttToday, snapshotLag, hasMinStockData,
 } from '../data/deliveryGantt'
 import { num, fmtDate, fmtTargetText, fmtTower, TODAY } from '../lib/format'
 import { seriesFor } from '../lib/colors'
@@ -77,15 +78,21 @@ export const LANE_MODES = [
 // End of today. A bar whose span has fully elapsed by this instant is drawn solid; one
 // that has not is drawn washed out. A delivery dated today counts as elapsed, which is
 // why this is the END of the day and not its start.
-const TODAY_EDGE = cursorEdge(TODAY)
-const isPast = (end) => end.getTime() <= TODAY_EDGE
+//
+// THREADED, not a module constant. It used to be cursorEdge(TODAY) evaluated once at
+// import, which pinned the whole chart to the stock snapshot date and never moved. The
+// today line is now the real current date (ganttToday), so the edge has to arrive from
+// the render that knows what day it is — which is why makeItem, packTrack and layoutRow
+// all take it. A module constant would also be stale for anyone leaving the tab open
+// past midnight.
+const isPast = (end, todayEdge) => end.getTime() <= todayEdge
 
 const sumQty = (members) => {
   const known = members.filter((m) => m.qty != null)
   return { qty: known.length ? known.reduce((a, m) => a + m.qty, 0) : null, tbc: members.length - known.length }
 }
 
-function makeItem(members, scale, totalW) {
+function makeItem(members, scale, totalW, todayEdge) {
   const start = new Date(Math.min(...members.map((m) => m.start.getTime())))
   const end = new Date(Math.max(...members.map((m) => m.end.getTime())))
   const x0 = scale(start.getTime())
@@ -109,7 +116,7 @@ function makeItem(members, scale, totalW) {
   return {
     members, start, end, x, w, trueW, stretched: trueW < MIN_BAR,
     qty, tbcCount: tbc, label, inside, leftSide, left, right,
-    past: isPast(end),
+    past: isPast(end, todayEdge),
   }
 }
 
@@ -120,34 +127,82 @@ function makeItem(members, scale, totalW) {
 // Two bars are never merged ACROSS the today line. Opacity is what tells elapsed from
 // scheduled, so a merged bar has to be wholly one or the other or it could not be drawn
 // truthfully — and the line is a real boundary in the reader's head, not a tick.
-function packTrack(bars, scale, totalW) {
+function packTrack(bars, scale, totalW, todayEdge) {
   if (!bars.length) return []
-  let items = bars.map((b) => makeItem([b], scale, totalW)).sort((a, b) => a.left - b.left)
+  let items = bars.map((b) => makeItem([b], scale, totalW, todayEdge)).sort((a, b) => a.left - b.left)
   for (let guard = 0; guard < 50; guard++) {
     const out = []
     let merged = false
     for (const it of items) {
       const prev = out[out.length - 1]
       if (prev && prev.past === it.past && it.left < prev.right + 3) {
-        out[out.length - 1] = makeItem([...prev.members, ...it.members], scale, totalW)
+        out[out.length - 1] = makeItem([...prev.members, ...it.members], scale, totalW, todayEdge)
         merged = true
       } else out.push(it)
     }
     items = out
     if (!merged) break
   }
+
+  // SEPARATION PASS — for the collisions merging is not allowed to resolve.
+  //
+  // Two bars on opposite sides of the today line are never merged (opacity is what
+  // distinguishes them, so a merged bar has to be wholly one or the other). But their
+  // spans can abut, and a bar narrower than MIN_BAR is drawn at MIN_BAR centred on its
+  // span — so it reaches past its own span's edges and lands on its neighbour. Measured
+  // on the 2026-09-10 data at Month zoom: two such overlaps, 4px and 32px.
+  //
+  // Only STRETCHED bars are moved, and that is the whole justification: a stretched bar
+  // is already drawn wider than the span it represents, so its pixel position is an
+  // approximation before this pass touches it. Nudging it a few pixels is strictly less
+  // wrong than drawing it on top of another delivery, and its exact dates are in the
+  // tooltip either way. A bar wide enough to be drawn honestly is never moved — if two
+  // of those collide, the check reports it rather than this silently hiding it.
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1]
+    const it = items[i]
+    if (it.left >= prev.right + 3) continue
+
+    // FIRST, try moving the NUMBER rather than the bar. Every collision measured on the
+    // 2026-09-10 data at Quarter zoom was the same shape: an elapsed bar ending at today
+    // with its number outside on the right, reaching into a scheduled bar whose estimate
+    // window straddles today. The two bars genuinely overlap in time and both must stay
+    // where they are; it is only the label that is in the wrong place. Flipping it to the
+    // bar's own left side resolves it and moves no data.
+    if (!prev.inside && !prev.leftSide) {
+      const lw = labelWidth(prev.label)
+      const newLeft = prev.x - lw - 4
+      const clearsBefore = i < 2 || newLeft >= items[i - 2].right + 3
+      if (newLeft >= 0 && clearsBefore) {
+        items[i - 1] = { ...prev, leftSide: true, left: newLeft, right: prev.x + prev.w }
+        if (it.left >= items[i - 1].right + 3) continue
+      }
+    }
+
+    // Otherwise nudge, and ONLY a stretched bar. A stretched bar is already drawn wider
+    // than the span it represents, so its pixel position is an approximation before this
+    // touches it — a few pixels is strictly less wrong than drawing it over another
+    // delivery, and its exact dates are in the tooltip either way. A bar wide enough to
+    // be drawn honestly is never moved: two of those overlapping means the deliveries
+    // really do overlap in time, which is information, so it is left visible.
+    const need = items[i - 1].right + 3 - it.left
+    if (need <= 0 || (!it.stretched && !prev.stretched)) continue
+    const dx = Math.min(need, Math.max(0, totalW - it.right))
+    if (dx <= 0) continue
+    items[i] = { ...it, x: it.x + dx, left: it.left + dx, right: it.right + dx, nudged: true }
+  }
   return items
 }
 
-function layoutRow(row, scale, mode, totalW) {
+function layoutRow(row, scale, mode, totalW, todayEdge) {
   const showIn = mode !== 'out'
   const showOut = mode !== 'in'
   // row.inBars is already the recorded receipts plus the dated schedule; row.outBars the
   // recorded pullouts. One track each, since the two kinds now look the same and putting
   // them on separate tracks would only let them overlap invisibly.
   return {
-    inItems: showIn ? packTrack(row.inBars, scale, totalW) : [],
-    outItems: showOut ? packTrack(row.outBars, scale, totalW) : [],
+    inItems: showIn ? packTrack(row.inBars, scale, totalW, todayEdge) : [],
+    outItems: showOut ? packTrack(row.outBars, scale, totalW, todayEdge) : [],
     showIn, showOut,
   }
 }
@@ -222,10 +277,35 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const scrollRef = useRef(null)
   const tlHeadRef = useRef(null)
   const leftHeadRef = useRef(null)
-  const [cursor, setCursor] = useState(() => startOfDay(TODAY))
+  // THE TODAY LINE IS THE REAL CURRENT DATE. `dayTick` exists only to re-read the clock:
+  // the date is captured once per mount, and a timer fires at the next local midnight to
+  // bump it, so a card left open overnight redraws its line on the new day instead of
+  // stranding it on yesterday. Everything downstream — the line, the chip, the Today
+  // button, bar opacity and the timeline window — reads this one value.
+  const [dayTick, setDayTick] = useState(0)
+  const today = useMemo(() => ganttToday(), [dayTick])
+  useEffect(() => {
+    const ms = startOfDay(new Date()).getTime() + 86400000 - Date.now()
+    const id = setTimeout(() => setDayTick((n) => n + 1), Math.max(1000, ms + 500))
+    return () => clearTimeout(id)
+  }, [dayTick])
+
+  const [cursor, setCursor] = useState(() => ganttToday())
   const [dragging, setDragging] = useState(false)
   const [expanded, setExpanded] = useState(() => new Set())
   const [hover, setHover] = useState(null)
+
+  // How stale the recorded side is. The safekeeping sheets are a snapshot, so the
+  // stretch between that date and today carries no receipts or pullouts — and an empty
+  // stretch to the LEFT of the line must not read as "nothing moved".
+  const lag = snapshotLag(TODAY, today)
+
+  // How many scheduled deliveries have no target date at all, counted over PARENTS (a
+  // parent already sums its children, so adding the opened rows would double it).
+  const undatedTotal = useMemo(
+    () => parents.reduce((a, p) => a + (p.undatedInCount || 0), 0),
+    [parents]
+  )
 
   const colWidth = TIMELINE_UNITS.find((u) => u.value === unit)?.colWidth || 74
 
@@ -233,7 +313,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   // filtering nor opening a material rescales the timeline underneath the reader.
   const allRows = useMemo(() => buildGanttRows(), [])
   const hasAnyRows = allRows.length > 0
-  const { from, to } = useMemo(() => timelineRange(allRows, unit), [allRows, unit])
+  const { from, to } = useMemo(() => timelineRange(allRows, unit, today), [allRows, unit, today])
   const ticks = useMemo(() => timelineTicks(from, to, unit), [from, to, unit])
   const groups = useMemo(() => tickGroups(ticks, unit), [ticks, unit])
 
@@ -244,13 +324,14 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const unscale = (x) => new Date(t0 + (Math.min(Math.max(x, 0), totalW) / totalW) * (t1 - t0))
 
   const rows = useMemo(() => visibleRows(parents, expanded), [parents, expanded])
-  const layouts = useMemo(() => rows.map((r) => layoutRow(r, scale, mode, totalW)), [rows, scale, mode, totalW])
+  const todayEdge = cursorEdge(today)
+  const layouts = useMemo(() => rows.map((r) => layoutRow(r, scale, mode, totalW, todayEdge)), [rows, scale, mode, totalW, todayEdge])
 
   const laneCount = mode === 'both' ? 2 : 1
   const rowH = LANE_H * laneCount
   const gridRows = `${HEAD_H}px repeat(${Math.max(rows.length, 1)}, ${rowH}px)`
 
-  const nowX = scale(cursorEdge(TODAY) - 1)
+  const nowX = scale(todayEdge - 1)
   const cursorX = scale(cursorEdge(cursor) - 1)
 
   // Capacity is summed over PARENTS only. A parent already equals the sum of its
@@ -330,7 +411,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const anyExpandable = parents.some((p) => p.expandable)
 
   const heldPct = SAFEKEEPING_M2 > 0 ? (cap.heldM2 / SAFEKEEPING_M2) * 100 : 0
-  const cursorIsNow = startOfDay(cursor).getTime() === startOfDay(TODAY).getTime()
+  const cursorIsNow = startOfDay(cursor).getTime() === today.getTime()
 
   const capTitle = [
     'PROVISIONAL floor-space estimate.',
@@ -370,7 +451,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
               <Icon name={allOpen ? 'minus' : 'plus'} size={12} /> {allOpen ? 'Collapse' : 'Expand'} all
             </button>
           )}
-          <button type="button" className={`btn-ghost btn-xs ${cursorIsNow ? 'is-on' : ''}`} onClick={() => jumpTo(TODAY)}>
+          <button type="button" className={`btn-ghost btn-xs ${cursorIsNow ? 'is-on' : ''}`} onClick={() => jumpTo(today)}>
             <Icon name="clock" size={12} /> Today
           </button>
           <button type="button" className="btn-ghost btn-xs" onClick={() => jumpTo(new Date(t1 - 1))}>
@@ -409,8 +490,13 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
             <div className="gtt-cell gtt-head gtt-left gtt-corner" ref={leftHeadRef}>
               <span className="gc gc-desc">Material</span>
               <span className="gc gc-n">BOH</span>
-              <span className="gc gc-n">In</span>
-              <span className="gc gc-n">Out</span>
+              <span className="gc gc-n" title={hasMinStockData
+                ? 'Minimum stock level — the buffer this material should not fall below.'
+                : 'Minimum stock level — the buffer this material should not fall below. Nothing in any source workbook records one, so every row reads as a dash. Fill in MIN_STOCK_LEVEL in deliveryGantt.js once the warehouse team supplies the figures.'}>Min</span>
+              {/* One header for the whole In / Out column. The two directions are named
+                  on their own sub-rows instead, which is what keeps each label beside
+                  the lane it belongs to. */}
+              <span className="gc gc-n">{mode === 'both' ? 'In / Out' : mode === 'in' ? 'In' : 'Out'}</span>
             </div>
             <div className="gtt-cell gtt-head gtt-thead" ref={tlHeadRef} style={{ paddingBottom: CURSOR_RAIL }}>
               <div className="gtt-groups">
@@ -427,7 +513,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
               </div>
               {/* Both markers' furniture sits in the header because the header is the
                   part that stays pinned; only their lines run down the rows. */}
-              <span className="gtt-now-tag" style={{ left: nowX }} title={`Today — ${fmtDate(TODAY)}`}>Today</span>
+              <span className="gtt-now-tag" style={{ left: nowX }} title={`Today — ${fmtDate(today)}`}>Today</span>
               <button type="button" className={`gtt-grip ${dragging ? 'is-drag' : ''}`} style={{ left: cursorX }}
                 onPointerDown={onHandleDown} onKeyDown={onHandleKey}
                 aria-label={`Position line, ${fmtDate(cursor)}. Arrow keys to move.`}
@@ -469,11 +555,38 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                       : `Stock before the first movement on this timeline. Wound back from the sheet's closing ${num(r.sheetSoh || 0)} by the ${num(r.recordedIn || 0)} received and ${num(r.recordedOut || 0)} issued since.`}>
                       {num(r.boh)}{r.bohAdjusted && <em className="gc-flag">!</em>}
                     </span>
-                    <span className="gc gc-n gc-in" title={`Every incoming bar on this row adds to ${num(r.totalIn)}${r.tbcIn ? ` — plus ${r.tbcIn} whose quantity is still TBC` : ''}.`}>
-                      {num(r.totalIn)}{r.tbcIn > 0 && <em className="gc-tbc">+{r.tbcIn}</em>}
+                    <span className={`gc gc-n gc-min ${r.minStock == null ? 'is-unset' : ''}`} title={r.minStock == null
+                      ? `No minimum stock level is recorded for ${r.materialName}. Nothing in the delivery workbook or the stock workbook carries one, so this is genuinely unset rather than zero — a zero here would read as "may run empty".`
+                      : `Minimum stock level ${num(r.minStock)} ${r.uom || ''}`.trim()
+                        + (r.minStockPartial ? ' — summed over only the projects that have one set, so it under-states the material.' : '')}>
+                      {r.minStock == null ? '—' : num(r.minStock)}
+                      {r.minStockPartial && <em className="gc-flag">!</em>}
                     </span>
-                    <span className="gc gc-n gc-out" title={`Every outgoing bar on this row adds to ${num(r.totalOut)}.`}>
-                      {num(r.totalOut)}
+
+                    {/* In and Out in ONE column, two sub-rows, each the height of the
+                        lane it totals — so the figure and its bars share a baseline.
+                        Switching to a single direction drops the other sub-row, which
+                        is what lets the row collapse to one lane with no special case. */}
+                    <span className="gc gc-flow">
+                      {L.showIn && (
+                        <span className="gf gf-in" title={[
+                          `Every incoming bar drawn on this row adds to ${num(r.totalIn)}.`,
+                          r.tbcIn ? `${r.tbcIn} more bar${r.tbcIn === 1 ? '' : 's'} carr${r.tbcIn === 1 ? 'ies' : 'y'} no agreed quantity (TBC in the source) and add nothing.` : '',
+                          r.undatedInCount ? `${r.undatedInCount} scheduled deliver${r.undatedInCount === 1 ? 'y' : 'ies'} totalling ${num(r.undatedIn)} ${r.uom || ''} have NO target date in the source, so they cannot be placed on the timeline and are not counted here.`.replace(/\s+/g, ' ') : '',
+                        ].filter(Boolean).join('\n')}>
+                          <em className="gf-tag">In</em>
+                          {num(r.totalIn)}
+                          {/* One chip for everything held OUT of the figure, so the
+                              column always equals the bars drawn beside it. */}
+                          {(r.tbcIn + r.undatedInCount) > 0 && <em className="gc-tbc">+{r.tbcIn + r.undatedInCount}</em>}
+                        </span>
+                      )}
+                      {L.showOut && (
+                        <span className="gf gf-out" title={`Every outgoing bar on this row adds to ${num(r.totalOut)}.`}>
+                          <em className="gf-tag">Out</em>
+                          {num(r.totalOut)}
+                        </span>
+                      )}
                     </span>
                   </div>
 
@@ -556,6 +669,16 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
           merged across the today line. Quantities read <em>TBC</em> where the source has not agreed one;
           those are excluded from every total rather than counted as zero. Floor space is a provisional estimate — hover it for the
           arithmetic and the pack sizes it depends on.
+          {!hasMinStockData && <>{' '}<strong>Minimum stock level is not recorded anywhere</strong> in either
+            source workbook, so that column reads as a dash on every row rather than
+            showing a number nobody has set.</>}
+          {undatedTotal > 0 && <>{' '}<strong>{undatedTotal} scheduled deliveries carry no target date</strong> at
+            all in the source. They cannot be placed on a timeline, so they draw no bar and
+            are not counted in the In column — the <em>+n</em> beside a figure is how many
+            were held back, and its tooltip gives the quantity.</>}
+          {lag > 0 && <>{' '}Recorded receipts and pullouts come from the {fmtDate(TODAY)} stock
+            snapshot, so the last {lag} day{lag === 1 ? '' : 's'} before the today line carry no
+            movement yet — that gap is an export date, not a quiet warehouse.</>}
         </span>
       </p>
     </div>

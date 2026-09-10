@@ -64,7 +64,7 @@ export default function DeliveryTracker() {
       if (status && r.status !== status) return false
       if (project && r.project !== project) return false
       if (trade && r.trade !== trade) return false
-      if (q && !`${r.materialName} ${r.brand} ${r.trade} ${r.project} ${r.batch} ${r.location} ${r.opsRemarks} ${r.prcRemarks}`.toLowerCase().includes(q)) return false
+      if (q && !`${r.materialName} ${r.brand} ${r.trade} ${r.project} ${r.batch} ${r.designation} ${r.description2} ${r.location} ${r.opsRemarks} ${r.prcRemarks}`.toLowerCase().includes(q)) return false
       return true
     })
   }, [status, project, trade, search])
@@ -106,13 +106,22 @@ export default function DeliveryTracker() {
     {
       key: 'materialName', label: 'Material Description', width: 300,
       render: (r) => {
+        // The secondary line now leads with the line item's OWN identity where the
+        // source gives one — designation plus its 2nd description ("PHD-002 · Right
+        // Swing", "W-02A"). Those two columns arrived with the 2026-09-10 hierarchical
+        // workbook; the changelog had recorded their absence as the reason this cell
+        // had nothing specific to say beyond the brand. Brand and detail fall back to
+        // the second line only where a batch is scheduled without itemised lines.
+        const lineId = [r.designation, r.description2].filter(Boolean).join(' · ')
         const brandDetail = [r.brand, r.matDetail].filter(Boolean).join(' · ')
+        const sub = lineId || brandDetail
         return (
           <>
             <span className="inv-desc" title={r.materialName}>{r.materialName}</span>
-            {brandDetail && <span className="inv-desc-sub" title={brandDetail}>{brandDetail}</span>}
-            <span className="inv-desc-path" title={`${r.trade}${r.batch ? ` · ${r.batch}` : ''}`}>
+            {sub && <span className="inv-desc-sub" title={sub}>{sub}</span>}
+            <span className="inv-desc-path" title={`${r.trade}${r.batch ? ` · ${r.batch}` : ''}${lineId && brandDetail ? ` · ${brandDetail}` : ''}`}>
               <span className="dtk-trade">{r.trade}</span>{r.batch && ` · ${r.batch}`}
+              {lineId && brandDetail && ` · ${brandDetail}`}
             </span>
           </>
         )

@@ -84,7 +84,13 @@ const toSkLog = (r) => ({
 })
 
 const toDelivery = (r) => ({
-  no: r.no, category: r.category, item: r.item, project: r.project, batch: r.batch, qty: r.qty, uom: r.uom,
+  no: r.no, category: r.category, item: r.item, project: r.project, batch: r.batch,
+  // Line-item detail, added 2026-09-10 with the hierarchical workbook. Defaulted to ''
+  // rather than left undefined so a database that has not had the migration run yet
+  // still hydrates — the fields simply read empty, which is what a blank source cell
+  // means anyway.
+  designation: r.designation || '', description2: r.description2 || '',
+  qty: r.qty, uom: r.uom,
   targetDate: day(r.target_date), targetText: r.target_text, location: r.location, warehouse: r.warehouse,
   status: r.status, opsRemarks: r.ops_remarks, dpPayment: r.dp_payment, prcRemarks: r.prc_remarks,
 })

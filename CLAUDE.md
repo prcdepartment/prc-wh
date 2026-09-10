@@ -36,7 +36,7 @@ Montserrat / Barlow Condensed, light + dark mode.
 
 **Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
 `inventory` (827), `ledger` (295), `safekeeping_soh` (189), `safekeeping_incoming` (305),
-`safekeeping_outgoing` (287), `delivery_tracker` (27). Read by all signed-in users;
+`safekeeping_outgoing` (287), `delivery_tracker` (355). Read by all signed-in users;
 **only admins write**. Counts are the 2026-09-07 snapshot — they change with every
 import, so treat them as "roughly this size", not as a contract.
 
@@ -59,18 +59,26 @@ Consequence: **arrays in `src/data/` must be mutated, never reassigned.** A
 **Refreshing the data from a new warehouse workbook — the whole loop:**
 
 ```bash
-npm run import -- "sample/<new workbook>.xlsx"   # xlsx  -> /private-data/*.js
-npm run seed                                      # /private-data/*.js -> supabase/seed/NN_seed.sql
+npm run import -- "sample/<stock workbook>.xlsx"           # inventory / ledger / safekeeping
+npm run import:delivery -- "sample/<delivery workbook>.xlsx" # delivery_tracker only
+npm run seed                                                # /private-data/*.js -> supabase/seed/NN_seed.sql
 ```
 
-Then update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`, and paste the seed
-parts into the Supabase SQL Editor **in order** (they are split only because the editor
-rejects a submission over ~1 MB). `scripts/import-snapshot.mjs` documents every reading
-rule and prints a report — row counts, valuation, how many lines it could not price and
-how many carry a recorded location. Read that report; it is where a bad workbook shows up.
-(The old hand-written `seed_inventory.sql` had drifted to a different snapshot and was
-missing five columns; generating removes that failure mode. The import step is generated
-for the same reason — the July snapshot's importer was ad-hoc and lost.)
+**Two importers, because they read two different files.** `import-snapshot.mjs` handles
+the monthly stock workbook; `import-delivery-tracker.mjs` handles the OSM Delivery Tracker,
+whose sheet is hierarchical (trade > item > project > batch > line item, with the batch
+level merged and carrying the target date). Each documents its own reading rules and
+prints a report — read the report, it is where a bad workbook shows up. Only run the one
+whose source actually changed.
+
+After a STOCK import, update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`.
+Then run any pending file in `supabase/migrations/` and paste the seed parts into the
+Supabase SQL Editor **in order** (they are split only because the editor rejects a
+submission over ~1 MB).
+
+Both importers are committed for the same reason: the July snapshot's importer was ad hoc
+and lost, and so was the first delivery-tracker one. Never read a workbook by hand — add
+the rules to the script so the next month is one command.
 - **Git**: branch `main`, single clean root commit (history reset 2026-08-16).
 - **Deploy**: GitHub Pages project site at `https://prcdepartment.github.io/prc-wh/`,
   built by `.github/workflows/deploy.yml` on every push to `main`.

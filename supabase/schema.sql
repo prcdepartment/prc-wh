@@ -264,6 +264,8 @@ create table if not exists public.delivery_tracker (
   item         text,
   project      text,
   batch        text,
+  designation  text,   -- line item model / handing: PHD-002, W-02A, "Left", "Right Swing"
+  description2 text,   -- source 2ND DESCRIPTION, qualifying the designation
   qty          text,   -- free text on the sheet: "TBC", "120 + 40", …
   uom          text,
   target_date  date,

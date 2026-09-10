@@ -9,9 +9,14 @@
 
    .gtt-scroll scrolls in BOTH axes and holds a single grid:
 
-       | Material BOH In Out |        timeline         |  EOH |
-         ^ sticky left                                    ^ sticky right
+       | Material  BOH  Min  In  |        timeline         |  EOH |
+       |                     Out  |                         |      |
+         ^ sticky left                                        ^ sticky right
        ^ header row is sticky top; the two corners are sticky in both axes
+
+   In and Out are ONE column of two stacked sub-rows, each the height of one lane, so
+   each figure sits on the same baseline as the lane it totals. Min is the minimum stock
+   level and is fed by MIN_STOCK_LEVEL in deliveryGantt.js, which no source populates.
 
    This replaced an earlier three-pane flex layout (frozen left, scrolling middle,
    frozen right). Three panes cannot share a VERTICAL scrollbar without a JS listener
@@ -28,9 +33,15 @@
   /* Column widths. The left block is the sum of its four columns and is quoted to the
      grid as one track, because the whole block is what sticks — four independently
      sticky cells would each need their own cumulative `left` offset. */
-  --gtt-desc: 216px;
+  --gtt-desc: 224px;
   --gtt-num: 62px;
-  --gtt-left: calc(var(--gtt-desc) + var(--gtt-num) * 3);
+  --gtt-min: 60px;
+  /* In and Out share ONE column of two stacked sub-rows, each exactly one lane tall so
+     the figure sits on the same baseline as the lane it totals. That is why the column
+     is a little wider than a plain number column: it carries its own IN / OUT gutter
+     labels rather than a header above it. */
+  --gtt-flow: 74px;
+  --gtt-left: calc(var(--gtt-desc) + var(--gtt-num) + var(--gtt-min) + var(--gtt-flow));
   --gtt-eoh: 78px;
 
   /* How tall the chart is allowed to be. Sized off the viewport so it fills the screen
@@ -157,8 +168,56 @@
 /* ------------------------------------------------------------------ left block */
 .gtt-left.gtt-lrow, .gtt-head.gtt-left {
   display: grid; align-items: center;
-  grid-template-columns: var(--gtt-desc) var(--gtt-num) var(--gtt-num) var(--gtt-num);
+  grid-template-columns: var(--gtt-desc) var(--gtt-num) var(--gtt-min) var(--gtt-flow);
 }
+
+/* ---- In / Out: ONE column, two stacked sub-rows -------------------------
+   In and Out used to be two columns side by side, which put the two figures on one
+   line while the chart beside them drew two lanes stacked — so a reader had to map
+   left-to-right onto top-to-bottom. They are now one column split the way the lanes
+   are: In on the upper sub-row, Out on the lower, each exactly --gtt-lane tall, so a
+   figure and the lane it totals share a baseline.
+
+   `align-self: stretch` is load-bearing: the left cell centres its children, so
+   without it this column would shrink to its content and the two sub-rows would stop
+   lining up with the lanes. Height comes from the sub-rows, so In-or-Out mode renders
+   one 22px sub-row in a 22px row with no special case. */
+.gc-flow {
+  align-self: stretch;
+  display: flex; flex-direction: column;
+  padding: 0;
+}
+.gf {
+  flex: 0 0 var(--gtt-lane); height: var(--gtt-lane);
+  display: flex; align-items: center; justify-content: flex-end; gap: 3px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums; font-weight: 700;
+}
+/* The same hairline the out LANE carries, so the split reads as the one division it
+   is rather than as two unrelated rules. Only when both are showing. */
+.gc-flow .gf-out:not(:first-child) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+.gf-in { color: var(--gtt-ink-in); }
+.gf-out { color: var(--gtt-ink-out); }
+/* Direction tag on each sub-row. The column has no per-direction header — the header
+   cell above it is a single "In / Out" — so each figure names its own direction. */
+.gf-tag {
+  flex: 0 0 auto; order: -1; margin-right: auto;
+  font-style: normal; font-size: 8px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; opacity: 0.72;
+}
+.is-child .gf-in { color: color-mix(in srgb, var(--gtt-ink-in) 72%, var(--text-muted)); }
+.is-child .gf-out { color: color-mix(in srgb, var(--gtt-ink-out) 72%, var(--text-muted)); }
+.is-child .gf { font-weight: 600; }
+
+/* ---- Minimum stock level ------------------------------------------------
+   Fed by MIN_STOCK_LEVEL in deliveryGantt.js, which is EMPTY: no source workbook
+   records a minimum, so every cell is an em dash today. Styled muted rather than as a
+   figure, because a dash rendered at figure weight reads as a missing value the card
+   failed to load rather than one nobody has set. */
+.gc-min { color: var(--text-muted); }
+.gc-min.is-unset { color: var(--text-muted); font-weight: 600; }
 .gc { padding: 0 8px; min-width: 0; font-size: 11.5px; color: var(--text); }
 .gtt-head .gc { font-size: inherit; font-weight: inherit; letter-spacing: inherit; color: inherit; }
 .gc-n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -192,7 +251,51 @@
    width so every name in the column starts on the same pixel. */
 .gd-caret-none { flex: 0 0 auto; width: 15px; height: 15px; }
 
-.is-parent .gd-name { font-weight: 800; }
+/* ---- PARENT ROWS --------------------------------------------------------
+   A material row used to differ from its projects by nothing but the weight of its
+   name, which at 11.5px is close to invisible once a few materials are open — the
+   chart read as one long list of equal rows. It now carries three quiet signals that
+   compound instead of one loud one:
+
+     1. a faint NEUTRAL tint across all three of its cells — neutral, not accent-tinted,
+        because the accent already means "hovered" here and a second accent wash would
+        make every parent look permanently hovered;
+     2. a hairline along its TOP edge, which is what actually separates one material
+        group from the previous material's last project;
+     3. a 2px bar down its leading edge, the vertical counterpart of the hairline the
+        child rows already carry, so the group reads as a bracket.
+
+   All three are ~4% mixes. Deliberately no bold background, no colour and no larger
+   type: the row is a heading, not an alert. Kept OFF the timeline bars themselves, so
+   nothing here changes how a bar reads.
+
+   `.gtt-lrow.is-parent` is two classes and so beats `.gtt-left`'s flat surface; the
+   hover rule below it restates the tint on top of the accent wash rather than letting
+   one replace the other, which would make a parent lose its identity under the
+   pointer. */
+.gtt-lrow.is-parent, .gtt-rrow.is-parent {
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+}
+.gtt-row.is-parent { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.gtt-lrow.is-parent, .gtt-row.is-parent, .gtt-rrow.is-parent {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 14%, transparent);
+}
+/* The leading edge bar. On ::before, which the child rows use for their own hairline,
+   so the two never coexist on one row. */
+.gtt-lrow.is-parent::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: color-mix(in srgb, var(--text) 26%, transparent);
+}
+/* Hover keeps the parent tint underneath the accent wash. */
+.gtt-lrow.is-parent.is-sel, .gtt-rrow.is-parent.is-sel {
+  background: color-mix(in srgb, var(--accent) 5%, color-mix(in srgb, var(--text) 4%, var(--surface)));
+}
+.gtt-row.is-parent.is-sel { background: color-mix(in srgb, var(--accent) 4%, color-mix(in srgb, var(--text) 4%, transparent)); }
+/* An OPEN material leads a group, so its leading bar takes the accent the children's
+   hairline uses — the bracket closes. */
+.gtt-lrow.is-parent.is-open::before { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+.is-parent .gd-name { font-weight: 800; letter-spacing: 0.01em; }
 .is-child .gd-name { font-weight: 600; color: var(--text-muted); font-size: 11px; }
 /* Child rows are indented and carry a hairline down their left edge, so an opened
    material reads as one block rather than as more top-level rows. */
@@ -209,14 +312,22 @@
 .gtt-row.is-sel { background: color-mix(in srgb, var(--accent) 4%, transparent); }
 
 .gc-flag { font-style: normal; font-weight: 900; color: var(--warn); margin-left: 3px; }
-.gc-tbc { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--text-faint); margin-left: 3px; }
+.gc-tbc { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--text-muted); margin-left: 3px; }
 
 .gc-eoh-h { display: flex; flex-direction: column; align-items: flex-end; gap: 0; line-height: 1.2; }
-/* --text-faint measures 4.65:1 on white but only 4.31:1 on the header's own --surface-2
-   tint, and this is an 8px date that has to be read. One step up clears it at 6.6:1. */
+/* SAME TRAP, THREE TIMES NOW. --text-faint is 4.65:1 on white — just over AA — so any
+   tint UNDER it drops it below 4.5. It happened on the header (--surface-2), and again
+   on 2026-09-10 when parent rows gained their 4% neutral tint: .gc-min and .gc-tbc both
+   measured 4.30:1 on a parent row and 4.65 on a white child row. Both are --text-muted
+   now (6.55:1). The rule to carry forward: --text-faint is only safe on the plain card
+   surface, never on a tinted row.
+
+   First instance, kept for the record: --text-faint measured 4.31:1 on the header's own
+   --surface-2 tint, and that is an 8px date which has to be read. One step up clears it
+   at 6.6:1. */
 .gc-eoh-h em { font-style: normal; font-size: 8px; font-weight: 700; letter-spacing: 0.01em; color: var(--text-muted); text-transform: none; }
 .gc-eoh { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 0; font-size: 12px; }
-.gc-eoh-full { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--text-faint); }
+.gc-eoh-full { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--text-muted); }
 
 /* ------------------------------------------------------------------ timeline head */
 .gtt-thead { display: flex; flex-direction: column; }
@@ -279,7 +390,13 @@
    orange and the pair still read as one family. Dark mode is exempt: there the fill is
    already the pale end of the family and the number is near-black, which clears 5.5. */
 .gbar.is-past { background: color-mix(in srgb, var(--c) 82%, black); }
-[data-theme='dark'] .gbar.is-past { background: var(--c); }
+/* Dark mode lifts the solid fill 18% toward WHITE, and for the same reason light mode
+   takes it 18% toward black: the number inside has to clear AA. In dark the number is
+   --brand-black, and on the raw bright fill that is 3.96:1 against the 4.5 a 9.5px
+   figure needs. The lift puts it at 4.80:1. Measured, not guessed — 88% white only
+   reaches 4.46. (This was short in the shipped 2026-09-10 build; the audit that passed
+   it had not sampled an inside label on a dark is-past bar.) */
+[data-theme='dark'] .gbar.is-past { background: color-mix(in srgb, var(--c) 82%, var(--white)); }
 /* Still ahead: the same colour washed back over the card, so a scheduled delivery reads
    as a promise rather than a fact — and the pair never needs a second hue to separate. */
 .gbar.is-future { background: color-mix(in srgb, var(--c) 15%, var(--surface)); }
@@ -315,11 +432,25 @@
 .gbar.gbar-out .gb-n {
   position: absolute; top: 50%; transform: translateY(-50%);
   color: color-mix(in srgb, var(--c) 78%, var(--text));
-  text-shadow: none; padding: 0;
+  text-shadow: none;
+  /* An outside label is positioned relative to its OWN bar, so it can land on top of a
+     DIFFERENT bar — which happens whenever a narrow elapsed delivery sits inside a wide
+     estimate window, a real and meaningful arrangement the chart must keep showing. Two
+     such cases at Day zoom on the 2026-09-10 data. The label carries its own surface
+     chip so it stays readable whatever it falls on, instead of the bar being moved or
+     the number dropped. Sized to the LABEL_PAD that packTrack already reserves, so the
+     chip cannot open a new collision. */
+  padding: 0 2px; border-radius: 2px;
+  background: var(--surface);
 }
 .gbar-out.lbl-right .gb-n { left: 100%; margin-left: 4px; }
 .gbar-out.lbl-left .gb-n { right: 100%; margin-right: 4px; }
-[data-theme='dark'] .gbar.gbar-out .gb-n { color: color-mix(in srgb, var(--c) 84%, var(--text)); }
+/* An OUTSIDE number sits on the ROW, not on a bar — so it has to clear AA against the
+   darkest row it can land on AND the lightest. Parent rows carry a 4% tint (see
+   .gtt-lrow.is-parent), and at the previous 84% this measured 4.57:1 on a plain row but
+   only 4.11:1 on a tinted parent row. 70% keeps the red hue and clears both: 5.39:1 on
+   the card surface and comfortably over 4.5 on the parent tint. */
+[data-theme='dark'] .gbar.gbar-out .gb-n { color: color-mix(in srgb, var(--c) 70%, var(--text)); }
 
 /* One bar standing for several. The badge is the only cue that a quantity is a sum, and
    without it a merged bar silently misreports how many deliveries there are. */
@@ -430,17 +561,17 @@
    usable. Below 720px it stops sticking altogether and the whole grid pans as one —
    at 375px a 200px frozen block plus EOH would leave the chart barely 100px. */
 @media (max-width: 1100px) {
-  .gtt-root { --gtt-desc: 184px; --gtt-num: 56px; --gtt-eoh: 72px; --gtt-maxh: calc(100vh - 210px); }
+  .gtt-root { --gtt-desc: 184px; --gtt-num: 56px; --gtt-min: 54px; --gtt-flow: 70px; --gtt-eoh: 72px; --gtt-maxh: calc(100vh - 210px); }
 }
 @media (max-width: 720px) {
-  .gtt-root { --gtt-desc: 168px; --gtt-num: 52px; --gtt-eoh: 66px; --gtt-maxh: calc(100vh - 190px); }
+  .gtt-root { --gtt-desc: 168px; --gtt-num: 52px; --gtt-min: 50px; --gtt-flow: 66px; --gtt-eoh: 66px; --gtt-maxh: calc(100vh - 190px); }
   .gtt-left, .gtt-right { position: relative; left: auto; right: auto; }
   .gtt-corner, .gtt-corner-r { left: auto; right: auto; }
   .gtt-bar { flex-direction: column; align-items: stretch; }
   .gtt-ctl { justify-content: flex-end; }
 }
 @media (max-width: 480px) {
-  .gtt-root { --gtt-desc: 148px; --gtt-num: 48px; --gtt-eoh: 60px; }
+  .gtt-root { --gtt-desc: 148px; --gtt-num: 48px; --gtt-min: 46px; --gtt-flow: 62px; --gtt-eoh: 60px; }
   .gtt-legend { gap: 7px 10px; }
   .gl { font-size: 9.5px; }
   .gtt-capwin { width: 140px; padding: 5px 7px 6px; }

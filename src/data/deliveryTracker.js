@@ -21,6 +21,10 @@ const TRADE_BY_CATEGORY = {
 // proper project names from the project master list (public.projects), confirmed with
 // the procurement team. Applied at build time so the column, the filter dropdown and the
 // search box all read the proper name rather than the shorthand.
+// Lancaster and OLP appear for the first time in the 2026-09-10 workbook and are NOT
+// in this map, so they render as the sheet's own short code. That is deliberate: the
+// proper name is not derivable from anything in the repo and guessing one would put an
+// invented project name on a procurement card. Add them here once procurement confirms.
 const PROJECT_NAME_BY_CODE = {
   AVESTA: 'Avesta Residences',
   JABS: '4PH Jab Greenwoods Dasmariñas',
@@ -42,19 +46,42 @@ const PROJECT_NAME_BY_CODE = {
 // repository, so the codes are resolved at runtime from the rows themselves.
 // `skNot` excludes a near-miss the keyword would otherwise sweep in.
 //
-// Two materials resolve to nothing and that is the data, not a bug: no sealant and no
-// wooden door has ever been booked into safekeeping, so both carry a scheduled
-// delivery with no stock history behind it. The splice-sleeve grouts (SS Mortar Grout,
-// GRW MC7-8) are deliberately NOT folded into "Rebar Coupler & Accessories" — they are
-// a separate consumable, and claiming them as coupler stock would overstate it. Fold
-// them in here if procurement says they belong to the same package.
+// SIX of the thirteen materials resolve to NOTHING in safekeeping, and that is the
+// data rather than an unfinished mapping. Checked keyword by keyword against the
+// 2026-09-07 safekeeping sheets: nothing described as a sealant, a wooden door, a wire,
+// a cable, a panel board, an IMC pipe, a conduit or a genset has ever been booked in.
+// Those rows carry a schedule with no stock history behind it, so their BOH is 0 and
+// their bars all sit to the right of today — which is exactly what the schedule says
+// about them. Each still carries the keywords that WOULD describe it, so the join
+// starts working by itself the first time such stock is received; what must not happen
+// is a near-miss keyword added to make a row look populated.
+//
+// The splice-sleeve grouts (SS Mortar Grout, GRW MC7-8) are deliberately NOT folded
+// into "Rebar Coupler & Accessories" — they are a separate consumable, and claiming
+// them as coupler stock would overstate it. Fold them in here if procurement says they
+// belong to the same package.
+//
+// AGW is the schedule's own shorthand for the aluminium-and-glass package, and the
+// 2026-09-10 workbook writes it two ways — "AGW (Jia Hua)" on four projects and
+// "AGW Sicher Aluminum" on Southscape. Same material, two suppliers, so both map to
+// the material name Aluminum with the brand carrying the difference, and both take the
+// keyword set that was already verified for the Sicher rows: the sheets describe this
+// stock by what it is (casement window, awning window, sliding door), never by
+// supplier, so widening the keywords for the new string would change what the existing
+// row reports for reasons that have nothing to do with the new data.
 const MATERIAL_MAP = {
   'Rebar Coupler & Accessories (Splice Sleeve)': { name: 'Rebar Coupler & Accessories', brand: 'Splice Sleeve', detail: '', match: 'coupler', sk: ['splice sleeve'] },
-  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: '', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
+  'AGW (Jia Hua)': { name: 'Aluminum', brand: 'Jia Hua', detail: 'Aluminium & glass', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
+  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: 'Aluminium & glass', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
   'KITCHEN CABINET': { name: 'Kitchen Cabinet', brand: '', detail: '', match: 'kitchen cabinet', sk: ['kitchen cabinet'] },
   'KITO SEALANT (Interior)': { name: 'Sealant', brand: 'Kito', detail: 'Interior', match: 'sealant', sk: ['sealant'] },
+  'PENGUIN SEALANT (Exterior)': { name: 'Sealant', brand: 'Penguin', detail: 'Exterior', match: 'sealant', sk: ['sealant'] },
   'Plumbing Fixtures (Laviya)': { name: 'Plumbing Fixtures', brand: 'Laviya', detail: '', match: 'lavatory', sk: ['bidet', 'mirror', 'water closet', 'shower head', 'shower set', 'kitchen sink', 'faucet', 'floor drain'] },
+  'SPC Flooring Yekalon': { name: 'SPC Flooring', brand: 'Yekalon', detail: '', match: 'spc flooring', sk: ['spc flooring'] },
   'WIRING DEVICES (Lonon)': { name: 'Wiring Devices', brand: 'London', detail: '', match: 'convenience outlet', sk: ['convenience outlet', 'way switch', 'cover plate'] },
+  'Wires & Cables Panel Boards': { name: 'Wires & Cables', brand: '', detail: 'Panel boards', match: 'thhn', sk: ['wire', 'cable', 'panel board'] },
+  'IMC PIPE (Electrical Conduits)': { name: 'IMC Pipe', brand: '', detail: 'Electrical conduits', match: 'imc pipe', sk: ['imc pipe', 'electrical conduit'] },
+  GENSET: { name: 'Genset', brand: '', detail: '', match: 'generator', sk: ['genset', 'generator set'] },
   'Wooden Door (Seyken)': { name: 'Wooden Door', brand: 'Seyken', detail: '', match: 'wooden door', sk: ['wooden door', 'flush door'] },
 }
 

@@ -2936,3 +2936,227 @@ read or grepped; they just are not re-read when nobody asked for them.
   `{pass, failCount, failures}`, not the raw measurements.**
 - **613 turns for three prompts** is the multiplier on all of it. Batching independent
   probes into one call is worth more than shortening any single one.
+
+### 2026-09-10 — Session: new delivery workbook imported; parent rows, real today, one In/Out column, Min Stock
+
+Five requests. The fifth — a new reference workbook — turned out to be the bulk of the
+work, because the file is shaped nothing like the one it replaces and it more than
+doubled the chart's data.
+
+**5. THE NEW SOURCE, AND A COMMITTED IMPORTER FOR IT.**
+`sample/MCC. PRC. OSM Delivery Tracker - Presentation 2.xlsx`. The previous delivery
+module was generated ad hoc and its generator was not kept — the exact failure mode this
+file records for the July stock snapshot — so the reading rules are now
+`scripts/import-delivery-tracker.mjs`, run with `npm run import:delivery -- "<workbook>"`.
+
+| | Previous | 2026-09-10 |
+|---|---|---|
+| Shape | flat "Warehouse Schedule" table | hierarchical, four levels deep |
+| Rows | 27 | **355 line items** across **171 delivery batches** |
+| Materials | 7 | **13** |
+| Projects | 5 | **7** — Lancaster and OLP are new |
+| Quantity | almost entirely the string "TBC" | a real number on 280 of 355 rows, 411,642 total |
+| Line detail | none | **DESIGNATION + 2ND DESCRIPTION** |
+| Status | authored on the sheet | not present — derived |
+
+The sheet is `TRADE band > ITEM (merged) > PROJECT (merged) > BATCH (merged, and the level
+that carries the target date, tower, destination and remarks) > one row per line item`.
+So **a batch is one scheduled delivery and its line items are what is in it** — which is
+the grain a Gantt bar wants, and the line items are what a bar's quantity is the sum of.
+Both levels are kept; nothing is aggregated away at import.
+
+Merges are expanded from the sheet's own `mergeCells` ranges rather than forward-filled.
+That is not pedantry: several blocks have line items whose BATCH is genuinely blank
+(AVESTA's wooden doors), and a fill would inherit the batch above and invent a schedule
+for them. ITEM and PROJECT *are* forward-filled afterwards, because this workbook's own
+merges stop short in two places — AGW (Jia Hua)'s column-A merge ends mid-material,
+orphaning ten JENARA window lines with no material at all, and the Plumbing Fixtures
+project merges cover only each project's first batch, orphaning three more. A line item
+always belongs to some material and some project, so a blank there is a formatting gap
+and the row above is the answer; a blank BATCH is data. 10 rows took the material above
+them, 3 the project, and the report prints those counts.
+
+**A REAL BUG IN THE XLSX READER, found before any data was read.** `scripts/lib/xlsx.mjs`
+matched a cell's attributes GREEDILY: `<c([^>]*)`. That swallows the trailing slash of a
+self-closing `<c r="A4" s="105"/>`, so the `/>` branch fails, the `>` branch matches that
+same `>`, and the "inner" group runs on to the next cell with a real `</c>` — absorbing
+every cell in between and filing its value under the EMPTY cell column. This workbook is
+written that way (Excel emits a styled empty `<c/>` for each cell of a formatted block),
+and the result was a shared-string INDEX sitting in column A and every date shifted one
+column left. One character fixes it — `[^>]*?`, lazy, so `/>` is tried before `>` at each
+length — and the reason is now a nine-line comment above the regex. Past imports were
+verified correct, so those workbooks evidently do not emit cells this way; the fix can
+only improve them.
+
+**Two more reading bugs, both caught by measurement rather than by reading the output.**
+The importer expanded merges and then classified rows, which is the wrong order: a blank
+spacer row sitting INSIDE a material's merged column-A span gains the item name and
+nothing else, so it reads exactly like a trade band — that reported **IMC PIPE as a
+fourth trade** — and it would also have been counted as a line item, inflating the count
+to 356. Classification now uses what each row AUTHORED, captured before expansion.
+
+Verified independently of the importer's own logic: QTY is authored per line item and
+never merged, so summing that column straight from the sheet is a check that does not go
+through any of the above — **280 numeric cells totalling 411,642 in both the sheet and
+the generated module**, every row carrying an item, a project and a category, no row with
+both a date and a text target, and no batch key reappearing non-contiguously.
+
+**App-side wiring.** `MATERIAL_MAP` gained the six new materials. Six of the thirteen now
+resolve to NOTHING in safekeeping and that is the data: checked keyword by keyword against
+the 2026-09-07 sheets, nothing described as a sealant, a wooden door, a wire, a cable, a
+panel board, an IMC pipe, a conduit or a genset has ever been booked in, so those rows
+carry a schedule with no stock history, BOH 0, and every bar right of today. Each keeps
+the keywords that WOULD describe it so the join starts working by itself once such stock
+arrives. AGW arrives under two strings — "AGW (Jia Hua)" on four projects and "AGW Sicher
+Aluminum" on Southscape — and both map to Aluminum with the brand carrying the difference,
+taking the keyword set already verified for the Sicher rows; widening it for the new
+string would have changed what the existing row reports for reasons unrelated to the new
+data. **Lancaster and OLP are deliberately NOT in `PROJECT_NAME_BY_CODE`** and render as
+their short code: the proper names are not derivable from anything in the repo and
+guessing would put an invented project name on a procurement card. Worth confirming with
+procurement.
+
+`designation` and `description2` are new columns on `public.delivery_tracker`
+(`supabase/migrations/2026-09-10_delivery_tracker_line_detail.sql`, run before the seeds),
+nullable because a blank is normal. `hydrate.js` defaults them to `''` so a database that
+has not had the migration run still hydrates. The Table view's Material Description cell
+now leads its second line with the line item's own identity where the source gives one
+("PHD-002 · Right Swing", "W-02A") — this file had recorded the absence of exactly those
+two fields as the reason that cell had nothing specific to say.
+
+**A BAR IS A BATCH, not a line item.** 355 line items would have been an unreadable
+chart: JABS wooden doors alone are 28 rows that are really 7 deliveries of four door
+types. So one bar per batch, its quantity the sum of its line items, the line items
+riding along for the tooltip. **171 bars, matching the importer's 171 batches exactly.**
+Keyed on the SOURCE item string, not the mapped material name — the two sealants both map
+to Sealant, so without it an interior and an exterior batch on the same date in the same
+project fused into one bar and summed two different products under one brand.
+
+**THE INVARIANT BROKE, AND THE NEW DATA IS WHAT EXPOSED IT.** This card is built on "every
+bar carries a number and those numbers sum to the row's In / Out column". A delivery with
+no target date cannot be placed on a timeline, so it draws no bar — but its quantity was
+still being added to the column. On 27 rows that never showed. On this workbook **70 of
+355 line items carry no target at all**, and the DOM check found Plumbing Fixtures
+reporting 72,998 against 26,120 drawn and the Jab sealant row reporting 95,234 with
+nothing drawn at all. Undated deliveries are now excluded from the column exactly as a
+TBC quantity already was, and reported instead: `undatedIn` / `undatedInCount` per row, a
+`+n` chip beside the figure covering everything held back, the quantity in its tooltip,
+and one sentence in the card note. **46 undated batches holding 175,567 units.** Every
+line item is still accounted for exactly once — 248 on drawn bars plus 107 undated = 355.
+
+**1. Parent rows read as headings now.** They differed from their projects by the weight
+of an 11.5px name, which is close to invisible once several materials are open. Three
+quiet signals that compound: a 4% NEUTRAL tint across all three cells (neutral, because
+the accent already means "hovered" and a second accent wash would make every parent look
+permanently hovered), a hairline along the TOP edge — which is what actually separates one
+material group from the previous material's last project — and a 2px bar down the leading
+edge, the vertical counterpart of the hairline the child rows already carry, so the group
+reads as a bracket that closes in accent when the material is open. All ~4% mixes, no
+bold background, no colour, no larger type: a heading, not an alert. Hover restates the
+tint underneath the accent wash rather than replacing it, so a parent keeps its identity
+under the pointer.
+
+**2. The today line is the real current date.** `TODAY` in `lib/format.js` stays the stock
+snapshot and must — the ledger back-cast, the aging bands and every figure on Analytics
+are measured in days before it — but a delivery schedule is read against the real
+calendar, so this card asks the clock. `ganttToday()` is a function, not a module
+constant: a constant is evaluated once when the bundle loads and would be stale for
+anyone leaving the tab open overnight. The component memoises it per mount and re-arms a
+timer at the next local midnight. The elapsed/scheduled edge is now THREADED through
+`makeItem` / `packTrack` / `layoutRow` rather than being a module-level
+`cursorEdge(TODAY)`. Because the recorded side comes from a snapshot three days behind,
+the card now also states that the last 3 days before the line carry no movement yet —
+that gap is an export date, not a quiet warehouse.
+
+**3. In and Out are ONE column of two stacked sub-rows.** They were two columns side by
+side, which put the two figures on one line while the chart beside them drew two lanes
+stacked, leaving the reader to map left-to-right onto top-to-bottom. Each sub-row is
+exactly `--gtt-lane` tall, so a figure and the lane it totals share a baseline —
+**measured: all 22 sub-rows aligned to their lane within 1px in Both mode, all 54 in In
+mode, all 54 in Out mode.** `align-self: stretch` is load-bearing (the left cell centres
+its children). Height comes from the sub-rows, so switching to a single direction renders
+one 22px sub-row in a 22px row with no special case, and the lone Out sub-row correctly
+drops the divider hairline via `:not(:first-child)`. Each sub-row carries its own IN / OUT
+tag, so the column needs only one header, which reads "In / Out", "In" or "Out" to match.
+
+**4. Minimum Stock Level column added, and it is honestly empty.** Searched before
+building it: **zero** matches for "minimum", "min stock", "reorder", "safety stock",
+"buffer" or "par level" anywhere in the delivery workbook, and no min-like header on any
+of the seven sheets of the 2026-09-07 stock workbook. So the column is real, fed by a
+named `MIN_STOCK_LEVEL` table in `deliveryGantt.js`, and every row shows an em dash with
+a tooltip saying it is unset rather than zero. There IS a `minLevel` on every inventory
+line and it must **not** be used for this — the importer synthesizes it
+(`1 + Math.floor(rnd() * 20)`), so wiring it in would print an invented reorder point on
+a procurement card. A parent minimum sums only the children that have one and flags
+itself partial, so a total never silently excludes the projects with no level set.
+
+**Bar collisions, classified rather than lumped.** The denser data (72–229 bars against
+52) surfaced overlaps a 52-bar chart never produced, and they are not all defects:
+- *Containment* — a narrow elapsed bar inside a wide estimate window — is real
+  information and is kept. Two at Day zoom.
+- *A past/future pair whose spans genuinely overlap* is also real: an estimate window can
+  straddle today. Kept.
+- *An outside label landing on another bar* was a real legibility problem, and the number
+  now carries its own surface chip so it reads whatever it falls on. Hit-tested with
+  `elementFromPoint` over every on-screen outside label: **41 tested, 0 covered by another
+  bar** (the 3 hits are the travelling capacity window, a deliberate overlay).
+- *Label-on-label* is a real defect and is fixed by moving the NUMBER, not the bar: every
+  case measured was an elapsed bar ending at today with its number outside on the right,
+  reaching into a scheduled bar. `packTrack` now flips that label to the bar own left
+  side when there is room, moving no data. Month and Week are completely clean; one 14px
+  overlap survives at Quarter zoom where there is genuinely no room on either side, and
+  both figures are in the tooltips.
+- A stretched bar (drawn wider than its span, so already an approximation) may be nudged
+  a few pixels. A bar wide enough to be drawn honestly is never moved.
+
+**Verified** at 1440x900 and 375x812, light and dark, across all four granularities and
+all three lane modes. A Node probe against the private masters asserts the model:
+**column == the sum of the DRAWN bars, EOH == BOH + In − Out, parent == the sum of its
+children on all eight reported fields, every line item accounted for exactly once, today
+inside the timeline window — all pass.** In the DOM: 108 lanes checked per granularity
+with bar numbers summing to their column at every zoom, **0 bars escaping a lane, 0
+clipped inside labels, 0 misaligned rows, 0 page-level horizontal scroll**, and parent ==
+sum of children on In / Out / BOH across all 10 expanded groups. Row heights uniform at
+44 in Both and 22 in In / Out. Drag exercised one action per call: grip 753 → 970, EOH
+recomputed, cursor date 2026 Sep 10 → 2027 Apr 13, floor space 5,444 → 9,441 m2.
+At 375px the page does not scroll sideways, the chart pans inside itself (2,319px), and
+all four columns stay visible at the mobile tokens (148 + 48 + 46 + 62).
+
+**Contrast: zero failures in both themes** — 68 pairs each, minimum **4.65:1 light** and
+**4.86:1 dark**, with bar numbers sampled across all eight buckets (inside/outside x
+past/future x parent/child). Three fixes came out of that audit:
+- The new parent tint pushed two existing `--text-faint` uses below AA — `.gc-min` and
+  `.gc-tbc` measured 4.30:1 on a parent row against 4.65 on a white child row. Both are
+  `--text-muted` now. **That is the third time this trap has been hit**, so the rule is
+  recorded in the stylesheet: `--text-faint` is only safe on the plain card surface,
+  never on a tinted row.
+- Dark-mode inside bar numbers were **3.96:1 and had shipped that way** in the
+  2026-09-10 build; the audit that passed it had not sampled that pair. The dark solid
+  fill now lifts 18% toward white — 4.80:1, and measured, since 88% only reaches 4.46.
+- Dark-mode outside bar numbers were 4.57:1 on a plain row but 4.11:1 on the new parent
+  tint; 70% toward `--text` clears both.
+
+**Two measurement traps, both already in this file, both hit again.** A `data-theme` flip
+applied by JS without a page reload reported **16 contrast failures that do not exist** —
+after a real reload the same audit returned zero. And the console buffer surfaced
+`undatedTotal is not defined` from an intermediate edit state long after the build was
+clean; a fresh tab settled it, for the third session running. A screenshot came back blank
+again, so every figure above is a DOM measurement.
+
+`npm run build` passes. `dist/` carries no item code, price, bin location, document
+reference, designation or project name — Lancaster and OLP do not appear at all, and the
+only new strings are supplier brand names in the committed `MATERIAL_MAP`, the same class
+as the Seyken / Laviya / Splice Sleeve already shipping.
+
+**To put this live** (Supabase SQL Editor, in order): run
+`supabase/migrations/2026-09-10_delivery_tracker_line_detail.sql`, then paste
+`supabase/seed/01..04_seed.sql`. `delivery_tracker` goes 27 to 355 rows; every other table
+is unchanged.
+
+**Open questions for the warehouse and procurement teams:**
+1. **Minimum stock level per material** — nothing records one. Give me the numbers (or a
+   sheet with a column) and the empty column fills.
+2. **Lancaster and OLP** — the proper project names, so they stop showing as short codes.
+3. `UNITS_PER_PALLET` — still the provisional table behind every floor-space figure.
+4. Still true, unchanged: **there is no outbound schedule anywhere in this system**, so
+   the out lane stays empty right of today.

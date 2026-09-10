@@ -155,10 +155,12 @@ add(insert('safekeeping_outgoing', skCols, OUTGOING_ROWS, skValues))
 add(
   insert(
     'delivery_tracker',
-    ['no', 'category', 'item', 'project', 'batch', 'qty', 'uom', 'target_date', 'target_text', 'location',
+    ['no', 'category', 'item', 'project', 'batch', 'designation', 'description2', 'qty', 'uom',
+      'target_date', 'target_text', 'location',
       'warehouse', 'status', 'ops_remarks', 'dp_payment', 'prc_remarks'],
     DELIVERY_TRACKER_ROWS,
-    (r) => [n(r.no), q(r.category), q(r.item), q(r.project), q(r.batch), q(r.qty), q(r.uom), d(r.targetDate),
+    (r) => [n(r.no), q(r.category), q(r.item), q(r.project), q(r.batch), q(r.designation), q(r.description2),
+      q(r.qty), q(r.uom), d(r.targetDate),
       q(r.targetText), q(r.location), q(r.warehouse), q(r.status), q(r.opsRemarks), q(r.dpPayment), q(r.prcRemarks)],
     'no'
   )

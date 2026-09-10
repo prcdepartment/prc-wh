@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "seed": "node scripts/generate-seeds.mjs",
     "model": "node scripts/generate-db-model.mjs && node scripts/generate-code-model.mjs",
-    "import": "node scripts/import-snapshot.mjs"
+    "import": "node scripts/import-snapshot.mjs",
+    "import:delivery": "node scripts/import-delivery-tracker.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

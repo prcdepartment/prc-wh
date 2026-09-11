@@ -11,6 +11,7 @@ import { useTheme } from '../context/ThemeContext'
 import { whAreaM2, WH_AREAS } from '../data/warehouseMap'
 import Icon from '../lib/icons'
 import { Toggle, NoData } from './ui'
+import DeliveryMonthPie from './DeliveryMonthPie'
 import '../styles/gantt.css'
 
 // ---------------------------------------------------------------------------
@@ -629,6 +630,13 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
            sticky inside it rather than being separate panes, which is what lets the
            whole chart be capped to the display height and scroll as a single object —
            three panes would need a scroll listener to stay in step vertically. */
+        <div className="gtt-main">
+        {/* The ring is its own column to the LEFT of the chart, showing the month the
+            position line is standing in — see DeliveryMonthPie. It sits outside the
+            scrollport so it does not scroll away with the rows, and it is the first
+            child so it reads before the chart rather than hanging off the end. */}
+        <DeliveryMonthPie parents={parents} cursor={cursor} />
+
         <div className="gtt-scroll" ref={scrollRef}>
           {/* The stage is a content-sized positioning context for the overlay and the
               footbar. They must NOT be grid items: an explicitly-placed item spanning
@@ -706,8 +714,21 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                           <Icon name="chevronRight" size={12} />
                         </button>
                       ) : <span className="gd-caret gd-caret-none" aria-hidden="true" />}
-                      <span className="gd-name" title={r.isParent ? [r.materialName, r.brand, r.matDetail].filter(Boolean).join(' · ') : r.project}>
-                        {r.isParent ? r.materialName : r.project}
+                      {/* Two lines on a parent in Both mode: the material, then the
+                          projects it is for. A child row's label is its project, shown
+                          by its SHORT name — the full one ellipsises in this column
+                          exactly where the projects differ ("4PH Jab Greenwo…" against
+                          "4PH Jena…"), so the distinctive word is the useful one and the
+                          full name stays in the tooltip. */}
+                      <span className="gd-lines">
+                        <span className="gd-name" title={r.isParent ? [r.materialName, r.brand, r.matDetail].filter(Boolean).join(' · ') : r.project}>
+                          {r.isParent ? r.materialName : r.projectShort || r.project}
+                        </span>
+                        {r.isParent && r.projectTags?.length > 0 && (
+                          <span className="gd-tags" title={`For ${r.projects.join(', ')}`}>
+                            {r.projectTags.map((t) => <em key={t} className="gd-tag">{t}</em>)}
+                          </span>
+                        )}
                       </span>
                       {r.isParent && r.expandable && <em className="gd-count">{r.projectCount}</em>}
                     </span>
@@ -827,6 +848,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
             </div>
           </div>
           </div>
+        </div>
         </div>
       )}
 

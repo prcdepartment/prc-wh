@@ -3453,3 +3453,112 @@ after this change.
    a price column, or a price list keyed to these materials.
 4. Lancaster and OLP still render as short codes; both are site-bound, so neither now
    appears on the tracker at all.
+
+### 2026-09-11 — Session: the month ring moves beside the chart; project tags, short names
+
+Three requests.
+
+**1. The Safekeeping list panel is as wide as the Warehouse one.** The wide `--clp-w`
+(560px, 660 above 1500) was scoped to `.wh-overview` alone, on the theory that
+Safekeeping's shorter rows needed less room. In practice the two are the same control —
+same `.card-split` markup, same donut, same ranked list beside it — and the different
+widths just made one look cramped next to its twin. `.distribution-card .card-split` now
+takes the same token. Measured: both panels 560px at 1440.
+
+**2. THE MONTH RING MOVED INTO THE CHART, and the position line drives it.** It was a
+card under the tracker with its own month arrows. The arrows are gone — the Gantt already
+has a control for "when", and two of them asked the reader to hold two notions of the
+current month at once. Drag the line and the ring follows, so the ring, the EOH column
+and the floor-space read-out now all answer for the same instant.
+
+It is its own column to the LEFT of the chart, 208px (190 below 1400), outside the
+scrollport so it does not scroll away with the rows. `.gtt-main` is the flex row that
+holds it and the scrollport; `min-width: 0` on the scrollport is load-bearing, because a
+flex item defaults to `min-width: auto` and the chart's content is thousands of pixels
+wide — without it the ring would be pushed off the card entirely. Below 1100px the two
+stack and the ring lays itself out as a row, because at that width a 200px chart is no
+chart at all. Measured at 1440: ring 208px, chart 1164px, no overlap, no page scroll.
+
+**The ring is drawn by hand rather than with the shared `DistributionDonut`.** That
+component is built for a card-width ring with leader labels; at 200px it falls through
+its width tiers and still wants more room than there is. A ring this small needs no
+labels on it — the legend beside it carries the names — so the honest version is a few
+arcs and a list. Everything past the fifth slice becomes one "Other" wedge; nine 1%
+entries is noise, and the exact split is in the panel behind any bar.
+
+**It reads the PARENT ROWS, not the raw schedule** (`monthsFromParents`), so it narrows
+with the filter bar and can never describe a different set of deliveries than the bars
+beside it. A parent's bar list is its children's concatenated, so each delivery counts
+once. Still quantity and not pesos, for the same reason as before — the workbook carries
+no price — and the ring says so under it.
+
+Two nothings are told apart, because they must not read alike: a month with no delivery
+at all says so and suggests moving the line; a month whose every quantity is TBC says
+that instead. An empty ring would have meant "nothing due", which is the opposite.
+
+**3. Short project names, and tags under each material.** `shortProjectName()` derives
+the one distinctive word rather than hand-listing it: strip a leading "4PH", drop the
+generic tail (Residences / Towers / Project / Site) and whatever follows it, keep the
+first word left. Verified against the real names and against the two forms of the
+"Bauhinia" example:
+
+    Avesta Residences              -> Avesta
+    4PH Jab Greenwoods Dasmariñas  -> Jab
+    4PH Jenara Orchard Dasmarinas  -> Jenara
+    4PH Strevi Bacoor              -> Strevi
+    Southscapes Trece Martires     -> Southscapes
+    Bauhinia Residences Project    -> Bauhinia
+    4PH Bauhinia Towers Cavite     -> Bauhinia
+
+Deriving rather than listing means a project appearing in a future workbook gets a
+sensible short name with nobody editing this file; `SHORT_OVERRIDE` is there for the
+cases the rule would get wrong, and is empty.
+
+A material row now carries its projects as tags on a second line — Rebar Coupler reads
+"Jenara, Jab, Avesta, Strevi". Deduplicated, so a material with two batches for one
+project does not tag it twice. **They only fit in Both mode**, and that is a real
+constraint rather than an oversight: a row is one lane per shown direction, 44px with
+both and 22px with one, and two lines of type need the 44. Growing the row is not an
+option — fixed row heights are what keep the chart inside the display — so the tag line
+is hidden in In/Out mode, where the projects are still in the name's tooltip, on the
+child rows and in every bar's panel. Measured: tags below the name at 44px, hidden at
+22px, name never clipped.
+
+Child rows use the short name as their own label now too. The full name ellipsised in a
+172px column exactly where the projects differ ("4PH Jab Greenwo…" against "4PH Jena…"),
+so the distinctive word is the useful one; the full name stays in the tooltip.
+
+**Verified.** A Node probe against the private masters: every parent tagged, no duplicate
+tags, tag count equal to its distinct children, every child carrying a single-word short
+name; the month buckets reconcile — 27 planned bars = 25 in months + 2 undated — and
+every month's material and project slices sum to its own stated total.
+
+In the browser at 1440x900 and 375x812, light and dark: the ring sits left of the chart
+with no overlap and nothing spilling its column, stacks full-width at 375, and no
+page-level horizontal scroll at either width. The line drives it end to end —
+11 Sep → September 2026 (1,020 units, Wooden Door 100%), dragged to 26 Dec → "nothing is
+scheduled in this month", dragged back to 7 Nov → November 2026 with Plumbing Fixtures
+70% and Aluminum 30% summing to 100% and to the month's own 2,346 units (1,646 + 700).
+Both Distribution panels measure 560px on the same build.
+
+**Contrast: zero failures in both themes**, 39 pairs light (min 4.57) and 43 dark (min
+4.90). One real failure found and fixed on the way: the project tags measured **3.54:1 in
+dark**. The chip's ground is the accent at 22% and the accent is itself a light red, so
+the chip sits well above the near-black card and `--brand-red-soft` on it falls short.
+Lightening the chip does not rescue it either (4.02 at 14%) — taking the red 30% toward
+white clears it at 4.90 and still reads as the in-direction colour the tag borrows.
+
+`npm run build` passes. `dist/` is unchanged in what it exposes: the five project names
+appear once each, from the `PROJECT_NAME_BY_CODE` map committed in an earlier session,
+and the derived short names add nothing new.
+
+**Measurement note.** The one-action-per-call rule bit again: a drag dispatched as
+pointerdown and pointermove in the SAME script does nothing, because React has not
+processed the pointerdown's state update before the move arrives, so the move handler is
+not attached yet. The first drag this session reported "the ring did not follow the line"
+for exactly that reason. Three separate calls — down, move, up — is the only pattern that
+works here.
+
+**Open, and worth a decision:** the ring shows the month the line is standing in. The
+alternative reading is cumulative-to-the-line, which would match how EOH and the
+floor-space figure behave. Say which you want; the change is one function.

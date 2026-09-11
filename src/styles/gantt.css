@@ -284,6 +284,43 @@
    the project is now the child row's own label and the trade is in the tooltip, which
    is what lets a row be 22px tall. */
 .gc-desc { display: flex; align-items: center; gap: 5px; overflow: hidden; }
+
+/* ---- PROJECT TAGS under a material row ----------------------------------
+   A parent row names a material; the tags under it name the projects that material is
+   arriving for, by their one distinctive word (Jab, Strevi, Southscapes — see
+   shortProjectName in deliveryTracker.js).
+
+   THEY ONLY FIT IN BOTH MODE, and that is a real constraint rather than an oversight.
+   A row is one lane per shown direction: 44px with both lanes, 22px with one. Two lines
+   of type need the 44; at 22 there is room for the name alone. So the tag line is shown
+   at the taller height and hidden at the shorter one, where the material's projects are
+   still in the name's tooltip, on the child rows, and in every bar's detail panel.
+   Growing the row to fit them is not an option — fixed row heights are what keep the
+   whole chart inside the display. */
+.gd-lines { min-width: 0; display: flex; flex-direction: column; gap: 1px; justify-content: center; }
+.gd-tags { display: flex; align-items: center; gap: 3px; overflow: hidden; }
+.gd-tag {
+  flex: 0 0 auto; font-style: normal;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.02em; line-height: 1;
+  padding: 2px 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--gtt-ink-in);
+  white-space: nowrap;
+}
+/* Dark mode needs a PALER red than the usual soft one, and this was measured rather
+   than guessed. The chip's ground is the accent at 22%, and the accent is itself a light
+   red, so the chip sits well above the near-black card — which leaves --brand-red-soft
+   at only 3.54:1 on it. Lightening the chip does not rescue it either (4.02 at 14%).
+   Taking the red 30% toward white clears it at 4.90 and still reads unmistakably as the
+   in-direction colour, which is what the tag is borrowing. */
+[data-theme='dark'] .gd-tag {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: color-mix(in srgb, var(--brand-red-soft) 70%, var(--white));
+}
+/* Past the third or so the tags stop being readable and start being a texture; the row
+   keeps whatever fits and the tooltip lists them all. Clipping rather than wrapping,
+   because wrapping would need a third line the row does not have. */
+.gtt-mode-in .gd-tags, .gtt-mode-out .gd-tags { display: none; }
 .gd-name { font-size: 11px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.005em; }
 .gd-count {
   flex: 0 0 auto; font-style: normal;
@@ -812,53 +849,83 @@
 }
 
 /* ==========================================================================
-   DELIVERIES BY MONTH — the ring under the tracker.
+   THE MONTH RING, in its own column left of the chart.
 
-   Lives in this stylesheet rather than index.css because it is part of the delivery
-   tracker and ships in the same lazy chunk, the same way the panel above does.
+   .gtt-main is the row that holds it and the scrollport. The ring is a fixed-width
+   column and the scrollport takes the rest — `min-width: 0` on the scrollport is
+   load-bearing, because a flex item defaults to min-width:auto and the chart's content
+   is thousands of pixels wide, which would push the ring off the card entirely.
+
+   Below 1100px the two stack: at that width the ring and a readable timeline cannot
+   share the row, and a 200px chart is no chart at all.
    ========================================================================== */
-.dmp-bar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 16px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-/* The month block takes the middle and CENTRES, so stepping from "July 2026" to
-   "September 2026" does not shuffle the arrows left and right under the pointer. */
-.dmp-month { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; }
-.dmp-month strong {
-  font-family: var(--gtt-figs); font-size: 19px; font-weight: 600; line-height: 1.1;
-  letter-spacing: 0.01em; color: var(--text); white-space: nowrap;
-}
-.dmp-month span { font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-align: center; }
-.dmp-tbc { font-style: normal; color: var(--text-muted); }
+.gtt-main { display: flex; align-items: stretch; gap: 0; }
+.gtt-main > .gtt-scroll { flex: 1 1 auto; min-width: 0; }
 
-.dmp-nav {
-  flex: 0 0 auto; width: 30px; height: 30px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--surface); color: var(--text-muted);
+.gsp {
+  flex: 0 0 var(--gsp-w, 208px);
+  width: var(--gsp-w, 208px);
+  display: flex; flex-direction: column; align-items: center;
+  gap: 7px;
+  padding: 12px 12px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
-.dmp-nav:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
-/* Disabled rather than hidden at the ends of the range: a control that vanishes makes
-   the row jump, and its absence does not explain that you have reached the first month. */
-.dmp-nav:disabled { opacity: 0.38; cursor: default; }
-.rot180 { transform: rotate(180deg); }
 
-.dmp-chart { padding: 6px 16px 4px; }
-.dmp-empty { padding: 26px 16px 30px; }
-
-.dmp-note {
-  display: flex; align-items: flex-start; gap: 7px; margin: 0;
-  padding: 10px 16px 14px;
-  font-size: 10.5px; line-height: 1.5; color: var(--text-muted);
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+.gsp-head { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; }
+.gsp-when {
+  font-family: var(--gtt-figs); font-size: 16px; font-weight: 600; line-height: 1.12;
+  letter-spacing: 0.01em; color: var(--text);
 }
-.dmp-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
-.dmp-note strong { color: var(--text); font-weight: 700; }
+.gsp-sub { font-size: 9.5px; font-weight: 600; color: var(--text-muted); }
 
-@media (max-width: 620px) {
-  .dmp-bar { padding: 9px 12px 8px; }
-  .dmp-month strong { font-size: 16px; }
-  .dmp-chart { padding: 4px 8px; }
-  .dmp-note { padding: 9px 12px 13px; }
+.gsp-cut { align-self: center; }
+
+/* Square by construction, so the arcs stay centred whatever width the column has. */
+.gsp-ring { width: 100%; max-width: 132px; aspect-ratio: 1; display: block; }
+.gsp-mid {
+  font-family: var(--gtt-figs); font-size: 15px; font-weight: 600;
+  fill: var(--text); text-anchor: middle; dominant-baseline: middle;
+}
+.gsp-mid-u {
+  font-size: 7px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  fill: var(--text-muted); text-anchor: middle;
+}
+
+.gsp-legend { width: 100%; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.gsp-legend li { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 9.5px; }
+.gsp-legend i { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 2px; }
+.gsp-nm {
+  flex: 1 1 auto; min-width: 0; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gsp-legend b {
+  flex: 0 0 auto; font-family: var(--gtt-figs); font-size: 11px; font-weight: 600;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+
+.gsp-none, .gsp-foot { width: 100%; margin: 0; font-size: 9.5px; line-height: 1.45; color: var(--text-muted); }
+.gsp-none { padding: 14px 0; text-align: center; }
+/* Pinned to the bottom of the column so the ring stays optically centred whatever the
+   legend's length, and so the caveat is always in the same place. */
+.gsp-foot { margin-top: auto; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+
+@media (max-width: 1400px) { .gtt-main { --gsp-w: 190px; } }
+@media (max-width: 1100px) {
+  /* Stacked: the ring above the chart, laid out as a row so it does not become a tall
+     block pushing the timeline below the fold. */
+  .gtt-main { flex-direction: column; }
+  .gsp {
+    flex: 0 0 auto; width: 100%;
+    flex-direction: row; align-items: center; flex-wrap: wrap; gap: 12px;
+    border-right: none; border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+  }
+  .gsp-head { width: auto; align-items: flex-start; text-align: left; }
+  .gsp-ring { width: 76px; max-width: 76px; }
+  .gsp-legend { width: auto; flex: 1 1 220px; flex-direction: row; flex-wrap: wrap; gap: 3px 12px; }
+  .gsp-legend li { flex: 0 0 auto; }
+  .gsp-nm { flex: 0 0 auto; }
+  .gsp-foot { margin-top: 0; padding-top: 0; border-top: none; flex: 1 1 100%; }
+  .gsp-none { padding: 4px 0; text-align: left; }
 }

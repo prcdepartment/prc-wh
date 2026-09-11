@@ -2180,12 +2180,22 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 .mat-list.dense .wpc-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (min-width: 1500px) { .card-split { --clp-w: 480px; --split-h: 480px; } }
-/* The Warehouse tab's two cards get an even wider list panel than the shared default
-   above — scoped to `.wh-overview` rather than raising the shared default, so
-   Safekeeping's Distribution card (same .card-split/.card-list-panel markup) keeps
-   the narrower width its shorter rows need. */
-@media (min-width: 1101px) { .wh-overview .card-split { --clp-w: 560px; } }
-@media (min-width: 1500px) { .wh-overview .card-split { --clp-w: 660px; } }
+/* The wide list panel, shared by the Warehouse tab's two Overview cards and by the
+   Safekeeping Distribution card.
+   It was scoped to `.wh-overview` alone on the theory that Safekeeping's shorter rows
+   needed less room. In practice the two cards are the same control — the same
+   .card-split markup, the same donut, the same ranked list beside it — and giving them
+   different widths just made the Safekeeping list look cramped next to its twin. The
+   chart side gives up the room either way; its own 780px cap was never the binding
+   constraint. */
+@media (min-width: 1101px) {
+  .wh-overview .card-split,
+  .distribution-card .card-split { --clp-w: 560px; }
+}
+@media (min-width: 1500px) {
+  .wh-overview .card-split,
+  .distribution-card .card-split { --clp-w: 660px; }
+}
 @media (max-width: 1100px) {
   /* Below this the panel and a readable chart cannot share the row: the donut would
      drop under its leader-label minimum. The list moves beneath the chart instead.

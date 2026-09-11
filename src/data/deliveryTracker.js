@@ -43,6 +43,41 @@ const PROJECT_NAME_BY_CODE = {
   Southscape: 'Southscapes Trece Martires',
 }
 
+// ---------------------------------------------------------------------------
+// SHORT PROJECT NAMES — the one distinctive word, for tags and narrow columns.
+//
+// The proper names are long and share most of their length: three of the five open with
+// "4PH" and three close with a municipality. Neither end tells them apart, so a name
+// truncated to fit a 172px column ellipsises exactly where the difference is. The one
+// word that identifies each — Jab, Jenara, Strevi, Avesta, Southscape — is what these
+// are, and it is the word people say out loud anyway.
+//
+// Derived where possible rather than hand-listed, so a project that appears in a future
+// workbook gets a sensible short name without anyone editing this file: strip a leading
+// "4PH", drop the generic tail (Residences / Residence / Project / Site) and the place
+// that follows it, and keep the first word left. The explicit map above it is for the
+// cases the rule would get wrong.
+const SHORT_OVERRIDE = {
+  // Only needed where the rule produces the wrong word. None so far.
+}
+const GENERIC_TAIL = /\b(residences?|towers?|project|site|development|homes?)\b.*$/i
+
+export function shortProjectName(name) {
+  const full = String(name || '').trim()
+  if (!full) return ''
+  if (SHORT_OVERRIDE[full]) return SHORT_OVERRIDE[full]
+  const stripped = full
+    .replace(/^\s*\d*\s*ph\s+/i, '')   // "4PH Jab Greenwoods…" -> "Jab Greenwoods…"
+    .replace(GENERIC_TAIL, '')          // "Avesta Residences"    -> "Avesta"
+    .trim()
+  // Whatever survives, take its first word — that is the distinctive one in every case
+  // here ("Jab Greenwoods Dasmariñas" -> "Jab", "Southscapes Trece Martires" ->
+  // "Southscapes"). A short code that was never mapped to a proper name (Lancaster, OLP)
+  // passes through unchanged, which is already as short as it gets.
+  const first = (stripped || full).split(/\s+/)[0]
+  return first.replace(/[,;]$/, '')
+}
+
 // The schedule's item strings are informal and bundle a brand in parentheses. This
 // splits each into a proper material NAME + BRAND (+ optional detail), confirmed with
 // the procurement team.
@@ -124,6 +159,9 @@ export function rebuildDeliveryRows() {
         // bridge to the safekeeping sheets; it is now simply the stable per-project key
         // the Gantt groups and keys its rows by, which a display name should not be.
         projectCode: r.project,
+        // The one distinctive word, used for the parent-row tags and as the child rows'
+        // own label. Computed once here so every consumer agrees on it.
+        projectShort: shortProjectName(PROJECT_NAME_BY_CODE[r.project] || r.project),
         materialName: m.name || r.item,
         brand: m.brand || '',
         matDetail: m.detail || '',

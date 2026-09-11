@@ -1,130 +1,145 @@
-import { useMemo, useState, useEffect } from 'react'
-import { deliveryMonths } from '../data/deliveryGantt'
-import { Card, Toggle, NoData } from './ui'
-import { DistributionDonut } from './charts'
+import { useMemo, useState } from 'react'
+import { monthsFromParents, monthAt } from '../data/deliveryGantt'
+import { Toggle } from './ui'
+import { categoricalFor } from '../lib/colors'
+import { useTheme } from '../context/ThemeContext'
 import { num } from '../lib/format'
-import Icon from '../lib/icons'
-import '../styles/gantt.css'
 
 // ---------------------------------------------------------------------------
-// DELIVERY MONTH BREAKDOWN — one month at a time, stepped with the arrows.
+// THE RING BESIDE THE CHART — the month the position line is standing in.
 //
-// IT COUNTS QUANTITY, NOT PESOS, and every label on it says so. The delivery workbook
-// records a quantity and a unit of measure and carries no price on any sheet, and the
-// tracker no longer reads the stock workbook that had one. A peso figure here would have
-// to come from multiplying by a unit cost nobody quoted for these deliveries — it would
-// look authoritative and be invented. Quantity is what the source actually supports.
+// It used to be a card under the tracker with its own month arrows. The arrows are gone:
+// the Gantt already has a control for "when", and having two was asking the reader to
+// keep two notions of the current month in their head. Drag the line and the ring
+// follows it, which also means the ring, the EOH column and the floor-space read-out are
+// all answering for the same instant.
 //
-// The mix is worth seeing even so: it answers "what is this month mostly made of", and
-// for a warehouse planning floor space that is the operative question anyway, since
-// space is taken by volume rather than by value.
+// IT COUNTS QUANTITY, NOT PESOS. The delivery workbook records a quantity and a unit of
+// measure for each line and carries no price on any sheet, and the tracker no longer
+// reads the stock workbook that had one. A peso figure would mean multiplying by a unit
+// cost nobody quoted for these deliveries — it would look authoritative and be invented.
+// The heading says "units", and the note under the chart says it again.
 //
-// Materials are the default cut; the toggle offers Projects, which answers "whose
-// material is arriving" instead. Both come off the same month.
+// DRAWN BY HAND rather than with the shared DistributionDonut. That component is built
+// for a card-width ring with leader labels and a legend; at the ~200px this column gets
+// it falls back through its width tiers and still wants more room than there is. A pie
+// this small needs no labels on it at all — the legend beside it carries the names — so
+// the honest version is a few arcs and a list.
 
 const CUTS = [
   { value: 'materials', label: 'Material', icon: 'layers' },
   { value: 'projects', label: 'Project', icon: 'location' },
 ]
 
-export default function DeliveryMonthPie() {
-  const { months, undated, undatedQty } = useMemo(() => deliveryMonths(), [])
+// A slice as an SVG path. Starts at 12 o'clock and runs clockwise, which is the reading
+// order for a share — and the arcs are drawn as a donut so the middle can hold the total.
+function arc(cx, cy, rOuter, rInner, from, to) {
+  const pt = (r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)]
+  // A slice at or above a full turn cannot be drawn as one arc — two half circles
+  // instead, or the path collapses to nothing and a 100% share renders empty.
+  const full = to - from >= Math.PI * 2 - 1e-6
+  if (full) {
+    const [x0, y0] = pt(rOuter, 0)
+    const [x1, y1] = pt(rOuter, Math.PI)
+    const [i0, i1] = pt(rInner, 0)
+    const [j0, j1] = pt(rInner, Math.PI)
+    return `M${x0} ${y0}A${rOuter} ${rOuter} 0 1 1 ${x1} ${y1}A${rOuter} ${rOuter} 0 1 1 ${x0} ${y0}`
+      + `M${i0} ${i1}A${rInner} ${rInner} 0 1 0 ${j0} ${j1}A${rInner} ${rInner} 0 1 0 ${i0} ${i1}`
+  }
+  const large = to - from > Math.PI ? 1 : 0
+  const [ax, ay] = pt(rOuter, from)
+  const [bx, by] = pt(rOuter, to)
+  const [cx2, cy2] = pt(rInner, to)
+  const [dx, dy] = pt(rInner, from)
+  return `M${ax} ${ay}A${rOuter} ${rOuter} 0 ${large} 1 ${bx} ${by}`
+    + `L${cx2} ${cy2}A${rInner} ${rInner} 0 ${large} 0 ${dx} ${dy}Z`
+}
+
+// Everything past the fifth slice becomes one "Other" wedge. A 200px ring cannot show
+// nine shares legibly, and a list of nine 1% entries is noise rather than detail — the
+// exact split is in the panel behind any bar.
+const MAX_SLICES = 5
+
+export default function DeliveryMonthPie({ parents, cursor }) {
+  const { theme } = useTheme()
+  const PALETTE = categoricalFor(theme)
   const [cut, setCut] = useState('materials')
 
-  // Open on the month nearest TODAY rather than on the first month in the file: the
-  // schedule runs into 2028, and a card that opens two years in the past would look
-  // broken. Falls back to the first month when every delivery is in the future.
-  const initial = useMemo(() => {
-    if (!months.length) return 0
-    const at = months.findIndex((m) => m.date.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime())
-    return at >= 0 ? at : months.length - 1
-  }, [months])
-  const [i, setI] = useState(initial)
-  useEffect(() => { setI(initial) }, [initial])
+  const { months, undated } = useMemo(() => monthsFromParents(parents), [parents])
+  const m = useMemo(() => monthAt(months, cursor), [months, cursor])
 
-  if (!months.length) {
-    return (
-      <Card title="Deliveries by Month" icon="donutSingle" pad={false}>
-        <div className="dmp-empty">
-          <NoData
-            what="No dated deliveries to break down"
-            why="Every delivery on the schedule is missing a target date, so none can be placed in a month."
-          />
-        </div>
-      </Card>
-    )
-  }
+  const slices = useMemo(() => {
+    const all = (m && m[cut]) || []
+    if (all.length <= MAX_SLICES) return all
+    const head = all.slice(0, MAX_SLICES)
+    const rest = all.slice(MAX_SLICES)
+    return [...head, { name: `Other (${rest.length})`, qty: rest.reduce((a, s) => a + s.qty, 0), other: true }]
+  }, [m, cut])
 
-  const m = months[Math.min(Math.max(i, 0), months.length - 1)]
-  const slices = m[cut] || []
-  // Same unit either way: both cuts divide the same month up by quantity.
-  const unit = "units scheduled"
+  const total = slices.reduce((a, s) => a + s.qty, 0)
 
-  const step = (d) => setI((n) => Math.min(Math.max(n + d, 0), months.length - 1))
+  // Geometry. The viewBox is square and the ring is centred in it, so the SVG can be
+  // sized purely by CSS without the arcs drifting off-centre.
+  const R = 46
+  const RI = 27
+  let angle = 0
+  const paths = slices.map((s, i) => {
+    const sweep = total > 0 ? (s.qty / total) * Math.PI * 2 : 0
+    const d = arc(50, 50, R, RI, angle, angle + sweep)
+    angle += sweep
+    return { d, s, colour: s.other ? 'var(--text-faint)' : PALETTE[i % PALETTE.length], pct: total > 0 ? (s.qty / total) * 100 : 0 }
+  })
 
   return (
-    <Card
-      pad={false}
-      title="Deliveries by Month"
-      icon="donutSingle"
-      sub={`${months.length} months scheduled`}
-      right={<Toggle options={CUTS} value={cut} onChange={setCut} size="sm" />}
-    >
-      <div className="dmp-bar">
-        <button type="button" className="dmp-nav" onClick={() => step(-1)} disabled={i === 0}
-          aria-label="Previous month">
-          <Icon name="chevronRight" size={15} className="rot180" />
-        </button>
-        <div className="dmp-month">
-          <strong>{m.label}</strong>
-          <span>
-            {num(m.total)} units · {m.lines} deliver{m.lines === 1 ? 'y' : 'ies'}
-            {m.tbc > 0 && <em className="dmp-tbc"> · {m.tbc} without a quantity</em>}
-          </span>
-        </div>
-        <button type="button" className="dmp-nav" onClick={() => step(1)} disabled={i === months.length - 1}
-          aria-label="Next month">
-          <Icon name="chevronRight" size={15} />
-        </button>
+    <aside className="gsp" aria-label="Deliveries in the month at the position line">
+      <div className="gsp-head">
+        <span className="gsp-when">{m ? m.label : 'No deliveries'}</span>
+        <span className="gsp-sub">
+          {m
+            ? <>{num(m.total)} units · {m.lines} deliver{m.lines === 1 ? 'y' : 'ies'}</>
+            : 'in the month at the line'}
+        </span>
       </div>
 
-      {/* A month whose every delivery is TBC has lines but no quantity — an empty ring
-          would read as "nothing due", which is the opposite of what it means. */}
-      {m.total <= 0 ? (
-        <div className="dmp-empty">
-          <NoData
-            what={`No agreed quantities in ${m.label}`}
-            why={`${m.lines} deliver${m.lines === 1 ? 'y is' : 'ies are'} scheduled this month, but the source records every one of their quantities as TBC, so there is nothing to divide up.`}
-          />
-        </div>
+      <Toggle options={CUTS} value={cut} onChange={setCut} size="sm" className="gsp-cut toggle-icons" />
+
+      {!m || total <= 0 ? (
+        // Two different nothings, and they must not read alike: no delivery at all in
+        // this month, versus deliveries whose quantities the source has not agreed.
+        <p className="gsp-none">
+          {m
+            ? `${m.lines} deliver${m.lines === 1 ? 'y' : 'ies'} scheduled, every quantity still TBC.`
+            : 'Nothing is scheduled in this month. Drag the position line to a month that has deliveries.'}
+        </p>
       ) : (
-        <div className="dmp-chart">
-          <DistributionDonut
-            data={slices}
-            metric="qty"
-            unit={unit}
-            leaderLines
-            wide
-            hideLegend={false}
-            innerRadius={64}
-            outerRadius={98}
-          />
-        </div>
+        <>
+          <svg className="gsp-ring" viewBox="0 0 100 100" role="img"
+            aria-label={`${slices.length} categories, largest ${slices[0]?.name} at ${paths[0]?.pct.toFixed(0)}%`}>
+            {paths.map((p, i) => (
+              <path key={i} d={p.d} fill={p.colour}>
+                <title>{`${p.s.name} — ${num(p.s.qty)} units, ${p.pct.toFixed(0)}%`}</title>
+              </path>
+            ))}
+            <text className="gsp-mid" x="50" y="50">{num(total)}</text>
+            <text className="gsp-mid-u" x="50" y="61">units</text>
+          </svg>
+
+          <ul className="gsp-legend">
+            {paths.map((p, i) => (
+              <li key={i} title={`${p.s.name} — ${num(p.s.qty)} units`}>
+                <i style={{ background: p.colour }} />
+                <span className="gsp-nm">{p.s.name}</span>
+                <b>{p.pct.toFixed(0)}%</b>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
-      <p className="dmp-note">
-        <Icon name="alert" size={12} />
-        <span>
-          <strong>This is quantity, not peso value.</strong> The delivery workbook records a
-          quantity and a unit of measure for each line and carries no price, so the ring divides
-          up units scheduled to arrive — mixing units of measure across materials, which is why
-          the share is more useful than the total. A delivery counts in the month its target
-          falls in; an estimate like “August 2026” counts in that month.
-          {undated > 0 && <> {undated} deliver{undated === 1 ? 'y' : 'ies'}
-            {undatedQty > 0 ? ` totalling ${num(undatedQty)} units` : ''} carry no target date at all
-            and appear in no month.</>}
-        </span>
+      <p className="gsp-foot">
+        Quantity, not value — the source carries no price.
+        {undated > 0 && ` ${undated} undated deliver${undated === 1 ? 'y is' : 'ies are'} in no month.`}
       </p>
-    </Card>
+    </aside>
   )
 }

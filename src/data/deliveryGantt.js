@@ -277,10 +277,12 @@ function buildLeafRows() {
         brand: d.brand,
         matDetail: d.matDetail,
         matchKey: d.matchKey,
-        skKeys: d.skKeys || [],
-        skNot: d.skNot || [],
         project: d.project,
         projectCode: d.projectCode || '',
+        // The one distinctive word — "Jab", "Strevi", "Southscapes". It is this row's
+        // own label (the full name ellipsises in a 172px column exactly where the
+        // projects differ) and it is what the parent above tags itself with.
+        projectShort: d.projectShort || d.project,
         isChild: true,
         trade: d.trade,
         uom: '',
@@ -329,6 +331,7 @@ function buildLeafRows() {
         // bars come from several children, so the bar has to name its own project —
         // reading it off the row would report the wrong one on every merged parent bar.
         sourceItem: d.item, brand: d.brand || '', project: d.project,
+        projectShort: d.projectShort || d.project,
         uom: d.uom && d.uom !== 'TBC' ? d.uom : '',
         // `warehouse` is the sheet's DELIVERY LOCATION — where the batch is bound, which
         // is not always the warehouse: several batches go straight to the project site.
@@ -418,6 +421,9 @@ export function buildGanttRows(keepLeaf) {
     p.expandable = p.children.length > 1
     p.projectCount = p.children.length
     p.projects = p.children.map((c) => c.project)
+    // Short names for the tags under a material row, in the children's own order.
+    // Deduplicated: a material with two batches for one project must not tag it twice.
+    p.projectTags = [...new Set(p.children.map((c) => c.projectShort).filter(Boolean))]
 
     const sum = (f) => p.children.reduce((a, c) => a + (Number(f(c)) || 0), 0)
     p.boh = sum((c) => c.boh)
@@ -649,50 +655,64 @@ export function capacityAt(rows, cursor) {
 //
 // Deliveries with no target at all cannot be placed in any month and are counted apart,
 // exactly as the timeline holds them out of the In column.
-export function deliveryMonths() {
+// IT TAKES THE PARENT ROWS, not the raw schedule, and that is deliberate: the parents
+// are what the chart is currently showing, so the ring narrows with the filter bar and
+// can never describe a different set of deliveries than the bars beside it. A parent's
+// bar list is the concatenation of its children's, so each delivery is counted once.
+export function monthsFromParents(parents) {
   const months = new Map()
   let undated = 0
   let undatedQty = 0
 
-  for (const d of deliveryRows) {
-    const q = parseQty(d.qty)
-    const span = targetSpan(d)
-    if (!span) {
-      undated += 1
-      if (q.value != null) undatedQty += q.value
-      continue
-    }
-    const key = `${span.start.getFullYear()}-${String(span.start.getMonth() + 1).padStart(2, '0')}`
-    let m = months.get(key)
-    if (!m) {
-      m = {
-        key,
-        date: startOfMonth(span.start),
-        label: span.start.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
-        total: 0, lines: 0, tbc: 0,
-        byMaterial: new Map(),
-        byProject: new Map(),
+  for (const p of parents) {
+    for (const b of p.planned) {
+      if (!b.start) {
+        undated += 1
+        if (b.qty != null) undatedQty += b.qty
+        continue
       }
-      months.set(key, m)
+      const key = `${b.start.getFullYear()}-${String(b.start.getMonth() + 1).padStart(2, '0')}`
+      let m = months.get(key)
+      if (!m) {
+        m = {
+          key,
+          date: startOfMonth(b.start),
+          label: b.start.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+          short: b.start.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }),
+          total: 0, lines: 0, tbc: 0,
+          byMaterial: new Map(),
+          byProject: new Map(),
+        }
+        months.set(key, m)
+      }
+      m.lines += 1
+      if (b.qty == null) { m.tbc += 1; continue }
+      m.total += b.qty
+      m.byMaterial.set(p.materialName, (m.byMaterial.get(p.materialName) || 0) + b.qty)
+      const proj = b.projectShort || b.project || '—'
+      m.byProject.set(proj, (m.byProject.get(proj) || 0) + b.qty)
     }
-    m.lines += 1
-    if (q.value == null) { m.tbc += 1; continue }
-    m.total += q.value
-    m.byMaterial.set(d.materialName, (m.byMaterial.get(d.materialName) || 0) + q.value)
-    m.byProject.set(d.project, (m.byProject.get(d.project) || 0) + q.value)
   }
 
   const list = [...months.values()].sort((a, b) => a.date - b.date)
+  const slices = (map) => [...map.entries()]
+    .map(([name, qty]) => ({ name, qty, value: qty }))
+    .sort((a, b) => b.qty - a.qty)
   for (const m of list) {
-    const slices = (map) => [...map.entries()]
-      .map(([name, qty]) => ({ name, qty, value: qty }))
-      .sort((a, b) => b.qty - a.qty)
     m.materials = slices(m.byMaterial)
     m.projects = slices(m.byProject)
     delete m.byMaterial
     delete m.byProject
   }
   return { months: list, undated, undatedQty }
+}
+
+// The month a given date falls in, or null. The ring beside the chart follows the
+// position line, so this is how the line picks which month to draw.
+export function monthAt(months, date) {
+  if (!date) return null
+  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+  return months.find((m) => m.key === key) || null
 }
 
 // ---------------------------------------------------------------------------

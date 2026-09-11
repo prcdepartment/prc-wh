@@ -7,7 +7,6 @@ import { CardListPanel, DescCell } from '../../components/MaterialList'
 import Select from '../../components/Select'
 import DataSheet from '../../components/DataSheet'
 import DeliveryTracker from '../../components/DeliveryTracker'
-import DeliveryMonthPie from '../../components/DeliveryMonthPie'
 import { DistributionDonut } from '../../components/charts'
 import { num } from '../../lib/format'
 import { seriesFor } from '../../lib/colors'
@@ -231,11 +230,10 @@ export default function SafekeepingTab({ pool, qtyUnit = 'units' }) {
 
           {/* The Delivery Tracker sits at the foot of the Overview — the schedule of
               movement in and out of the yard, sourced from the real Warehouse Schedule
-              sheet. It used to be its own Activity sub-view. */}
+              sheet. It used to be its own Activity sub-view. The monthly breakdown ring
+              is inside that card now, beside the chart and driven by its position line,
+              rather than a second card under it. */}
           <DeliveryTracker />
-          {/* The monthly breakdown reads the same warehouse-bound schedule the tracker
-              above does, so the two can never disagree about what is due when. */}
-          <DeliveryMonthPie />
         </div>
       )}
 

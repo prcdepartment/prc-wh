@@ -3160,3 +3160,140 @@ is unchanged.
 3. `UNITS_PER_PALLET` — still the provisional table behind every floor-space figure.
 4. Still true, unchanged: **there is no outbound schedule anywhere in this system**, so
    the out lane stays empty right of today.
+
+### 2026-09-11 — Session: Gantt compressed and restyled; a detail panel behind every bar
+
+Four requests, and the first two turned out to be the same change.
+
+**1 + 2. FIGURES MOVED TO A CONDENSED FACE, which is what paid for the compression.**
+The bar quantities were Montserrat 9.5px/**800** — a slab of ink on a 16px bar, shouting
+louder than the bar it sat on, which is what "too bold" was pointing at. Barlow Condensed
+is already loaded for the brand (`index.html` asks for 500/600/700) and was going unused
+in this module; it is a genuinely different typeface from the Montserrat around it, and
+about 15% narrower per digit.
+
+So the rule is now: **figures are condensed, text is not.** Applied to the bar labels
+(11px/500), the BOH / Min / In / Out / EOH columns (12.5px/600), the tick row, the
+project-count chip and the floor-space read-out. Never to prose.
+
+That narrowness is what let the left section shrink without losing anything:
+
+| | Before | After |
+|---|---|---|
+| Material | 224px | 172px |
+| BOH | 62px | 50px |
+| Min | 60px | 46px |
+| In / Out | 74px | 60px |
+| **Left block** | **420px** | **328px** — 22% back to the chart |
+| EOH | 78px | 66px |
+
+`--gtt-figs` holds the stack; the responsive overrides were rescaled to the new base
+(the 1100px tier had been *larger* than it once the base came down).
+
+**CHAR_W had to be re-measured, and that is not optional.** `packTrack` reserves label
+room with it, so an under-estimate puts two numbers on top of each other. Measured off
+the rendered DOM across all 72 on-screen labels: a digit is **5.20px** against the old
+7.3, and a comma less, so the widest case is an all-digit string. `CHAR_W` is 5.25 —
+rounded UP, because over-reserving leaves a gap and under-reserving collides. There is a
+comment on the constant saying it must be re-measured if the rule changes.
+
+**A side effect worth recording: the narrower face fixed a known defect.** Labels now fit
+INSIDE their bars far more often (84% at Day zoom), and the single 14px label-on-label
+collision at Quarter zoom that the 2026-09-10 entry recorded as an accepted limitation is
+**gone** — there is now room where there was none. All four zooms measure zero label
+collisions.
+
+**3. A DETAIL PANEL BEHIND EVERY BAR.** Bars are `<button>`s now; clicking one slides a
+panel in from the right.
+
+A bar can stand for one delivery or several merged at this zoom, and each delivery holds
+its own line items — the door types, window types and fixtures inside one batch. None of
+that fits a tooltip, and the tooltip was already truncating at 8 members and dropping
+every line item the 2026-09-10 workbook added. The panel shows, per delivery: the batch,
+its target (firm date or estimate window, labelled as which), the source item, the tower,
+**where it is bound** (several batches go to the site rather than the warehouse — the
+sheet's DELIVERY LOCATION, newly carried onto the bar), the DP status, both sets of
+remarks, and a table of its line items with designation, description and quantity. For a
+recorded receipt it shows the date, the DR reference and the real item codes instead.
+
+Everything is read off the bar's own members, so the panel can never disagree with the
+bar it was opened from. Verified on a merged bar: 4 deliveries, 13 line items, and the
+line quantities 120 + 510 + 510 + 32 summing to the batch's own 1,172.
+
+Three decisions worth keeping:
+- It **overlays** the chart rather than sitting beside it. Laid out beside it, opening the
+  panel would narrow the timeline and re-scale every bar at the moment of the click — you
+  would press one bar and watch them all move.
+- It is a sibling of the **scrollport**, not a child. Inside, it would scroll away with
+  the rows and be clipped by the scrollport's own overflow.
+- It **closes itself** when the zoom, the lane mode or the filter changes, because any of
+  those can remove the bar it is showing — switching to Out drops every in-lane bar, and a
+  zoom change re-merges bars into different groups.
+
+Escape closes it, the close button closes it, the open bar carries a ring (not a colour
+change, so it still reports its own direction and state), and the bar takes a real
+focus-visible outline now that it is a button. Full width on a phone — a 360px drawer
+over a 375px viewport leaves a 15px sliver of chart, which is neither one thing nor the
+other.
+
+`.gbar` needed `padding: 0; appearance: none` for the same reason: the user agent's
+button box would otherwise be added INSIDE the width `packTrack` computed, and the bar
+would no longer match the dates it stands for.
+
+**4. The rest of the revamp.** Quieter rules and lighter weights throughout: column
+dividers dropped from `--border-strong` to `--border` (the strong value drew a hard black
+line down the middle of the card and was the loudest thing on it), grid lines and the
+alternating band lightened, row rules softened, the header band from 800 to 700, bars
+rounder (3px → 4px) and thinner-edged (1.5px → 1px), and the merge badge from 900 to a
+condensed 600 on a softened ground. The parent-row name came down from 800 to 700 — the
+row already carries a tint, a top hairline and a leading bar, so a heavier name was the
+fourth statement of one fact.
+
+**The floor-space read-out is now an exact fit, and it was not before.** Moving it to the
+condensed face grew it, which surfaced arithmetic that had been slightly wrong all along:
+the window is pinned to the bottom of the scrollport and `FOOT_H` reserves room so it
+covers no row — but at 104 with an 8px offset it was 6px short, and had been quietly
+clipping the bottom of the last row. Raising `FOOT_H` to 112 fixed the overlap and broke
+something better: content went 650 → 658 against a 650px scrollport, so the chart stopped
+fitting the display, which is a property this card was explicitly built for. The answer
+was to close the gap instead — the read-out trimmed to 99px and its `bottom` from 8px to
+5px, so **99 + 5 = 104 = FOOT_H exactly**. Content is back to 650 in a 650px port (fits),
+with **0px** clearance to the last row (was −6px). All three numbers are now load-bearing
+and the comment on `FOOT_H` says so.
+
+**Verified** at 1440x900 and 375x812, light and dark. Across all four granularities:
+**zero label-on-label collisions, zero label-on-bar, zero clipped labels, zero bars
+escaping a lane, zero same-state bar overlaps, zero misaligned rows, zero page-level
+horizontal scroll**, and bar numbers still summing to their column on all 108 lanes at
+every zoom. The two containments at Day zoom and the one across-today span overlap at
+Quarter/Month are the real-data cases the previous entry documented, and are kept.
+
+Panel exercised end to end: opens on a merged bar (4 members, 13 line items) and on a
+single recorded bar (DR reference, item codes, no line table), flush to the card's right
+edge and full height, its body the only scrolling part, closes on Escape and on a zoom
+change, full-width at 375px with nothing spilling.
+
+**Contrast: zero failures in both themes** — 114 pairs each, minimum **4.65:1 light** and
+**4.86:1 dark**, with the whole panel audited and bar numbers sampled across all eight
+buckets (inside/outside x past/future x parent/child).
+
+**Known and accepted:** at 172px the Material column ellipsises 4 distinct names — the two
+4PH project names, Southscapes and "Rebar Coupler & Accessories" — each keeping 18–20 of
+its 27–29 characters, so the identifying part survives ("4PH Jab Greenwoods…", "Rebar
+Coupler & Acc…") and the full text is in the tooltip. That is the cost of the requested
+compression, taken deliberately.
+
+**Measurement notes.** Two artifacts of the hidden browser pane cost time and are worth
+knowing. The panel's entry animation never advances while the pane is not compositing, so
+it sits permanently at its first frame — every geometry reading of the panel was 14px out
+until the animations were explicitly finished, and the "panel is not flush right" failure
+was entirely that. And a sticky element cannot be compared against content coordinates: a
+first pass reported the floor-space window overlapping the last row by 6px by measuring a
+pinned element against unpinned ones, which is not a like-for-like comparison — the real
+test is whether the chart fits its scrollport and the window sits inside the space
+reserved for it. A screenshot came back blank again, so every figure above is a DOM
+measurement.
+
+`npm run build` passes. `dist/` carries no item code, price, bin location, document
+reference, designation, tower or project name — the only code-shaped strings are the
+three form placeholders in the Add Material and Add Safekeeping modals, as before.

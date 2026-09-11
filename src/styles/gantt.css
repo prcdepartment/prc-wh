@@ -30,19 +30,29 @@
    =========================================================================== */
 
 .gtt-root {
+  /* Positioning context for the detail panel, which overlays the chart's right edge. */
+  position: relative;
   /* Column widths. The left block is the sum of its four columns and is quoted to the
      grid as one track, because the whole block is what sticks — four independently
      sticky cells would each need their own cumulative `left` offset. */
-  --gtt-desc: 224px;
-  --gtt-num: 62px;
-  --gtt-min: 60px;
+  --gtt-desc: 172px;
+  --gtt-num: 50px;
+  --gtt-min: 46px;
   /* In and Out share ONE column of two stacked sub-rows, each exactly one lane tall so
      the figure sits on the same baseline as the lane it totals. That is why the column
      is a little wider than a plain number column: it carries its own IN / OUT gutter
      labels rather than a header above it. */
-  --gtt-flow: 74px;
+  --gtt-flow: 60px;
   --gtt-left: calc(var(--gtt-desc) + var(--gtt-num) + var(--gtt-min) + var(--gtt-flow));
-  --gtt-eoh: 78px;
+  --gtt-eoh: 66px;
+
+  /* FIGURES ARE SET IN A CONDENSED FACE, text is not. Barlow Condensed is already
+     loaded for the brand (index.html asks for 500/600/700) and was going unused here.
+     It does two jobs at once: it is a genuinely different typeface from the Montserrat
+     around it, so a quantity reads as a figure rather than as more label; and it is
+     about 15% narrower at the same optical size, which is what paid for the 92px this
+     column block just gave back. Never used for prose — only for numerals. */
+  --gtt-figs: 'Barlow Condensed', 'Barlow Semi Condensed', var(--font);
 
   /* How tall the chart is allowed to be. Sized off the viewport so it fills the screen
      and stops there: roughly 240px is taken by the topbar, the dashboard tabs, the KPI
@@ -130,7 +140,7 @@
    push the row past the height the JS template promised. */
 .gtt-cell {
   position: relative; min-width: 0;
-  box-shadow: inset 0 -1px 0 var(--border);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--border) 62%, transparent);
 }
 
 /* PAINT ORDER, stated once. Bars are sealed inside their own row (see .gtt-row), so the
@@ -146,9 +156,11 @@
 .gtt-left, .gtt-right { z-index: 4; background: var(--surface); }
 .gtt-left { position: sticky; left: 0; }
 .gtt-right { position: sticky; right: 0; }
+/* The frozen columns are separated by a hairline, not a rule. --border-strong drew a
+   hard black line down the middle of the card and was the loudest thing on it. */
 .gtt-left::after, .gtt-right::after {
   content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
-  background: var(--border-strong);
+  background: var(--border);
 }
 .gtt-left::after { right: 0; }
 .gtt-right::after { left: 0; }
@@ -158,7 +170,7 @@
   position: sticky; top: 0; z-index: 5;
   background: var(--surface-2);
   box-shadow: inset 0 -1px 0 var(--border-strong);
-  font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
   color: var(--text-muted);
 }
 /* The two corners stick in BOTH axes — one element carrying `top` and `left`/`right`. */
@@ -190,8 +202,9 @@
 .gf {
   flex: 0 0 var(--gtt-lane); height: var(--gtt-lane);
   display: flex; align-items: center; justify-content: flex-end; gap: 3px;
-  padding: 0 8px;
-  font-variant-numeric: tabular-nums; font-weight: 700;
+  padding: 0 7px;
+  font-family: var(--gtt-figs); font-size: 12.5px; font-weight: 600;
+  letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
 }
 /* The same hairline the out LANE carries, so the split reads as the one division it
    is rather than as two unrelated rules. Only when both are showing. */
@@ -204,8 +217,9 @@
    cell above it is a single "In / Out" — so each figure names its own direction. */
 .gf-tag {
   flex: 0 0 auto; order: -1; margin-right: auto;
-  font-style: normal; font-size: 8px; font-weight: 800; letter-spacing: 0.06em;
-  text-transform: uppercase; opacity: 0.72;
+  font-family: var(--font); font-style: normal;
+  font-size: 7.5px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; opacity: 0.6;
 }
 .is-child .gf-in { color: color-mix(in srgb, var(--gtt-ink-in) 72%, var(--text-muted)); }
 .is-child .gf-out { color: color-mix(in srgb, var(--gtt-ink-out) 72%, var(--text-muted)); }
@@ -217,10 +231,17 @@
    figure, because a dash rendered at figure weight reads as a missing value the card
    failed to load rather than one nobody has set. */
 .gc-min { color: var(--text-muted); }
-.gc-min.is-unset { color: var(--text-muted); font-weight: 600; }
-.gc { padding: 0 8px; min-width: 0; font-size: 11.5px; color: var(--text); }
+.gc-min.is-unset { color: var(--text-muted); font-weight: 500; }
+.gc { padding: 0 7px; min-width: 0; font-size: 11px; color: var(--text); }
 .gtt-head .gc { font-size: inherit; font-weight: inherit; letter-spacing: inherit; color: inherit; }
-.gc-n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+/* 12.5px in a condensed face occupies less width than 11.5px in Montserrat and reads
+   LARGER, because condensed faces carry more x-height per em. That is the trade that
+   makes a 50px column work where 62px was needed before. */
+.gc-n {
+  text-align: right; font-family: var(--gtt-figs);
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
 .gc-in { color: var(--gtt-ink-in); }
 .gc-out { color: var(--gtt-ink-out); }
 .gtt-head .gc-n { text-align: right; }
@@ -229,11 +250,12 @@
    the project is now the child row's own label and the trade is in the tooltip, which
    is what lets a row be 22px tall. */
 .gc-desc { display: flex; align-items: center; gap: 5px; overflow: hidden; }
-.gd-name { font-size: 11.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-name { font-size: 11px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.005em; }
 .gd-count {
   flex: 0 0 auto; font-style: normal;
-  font-size: 8.5px; font-weight: 800; line-height: 1;
-  padding: 2px 4px; border-radius: 3px;
+  font-family: var(--gtt-figs);
+  font-size: 10px; font-weight: 600; line-height: 1;
+  padding: 2px 5px; border-radius: 3px;
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text-muted);
 }
@@ -295,7 +317,10 @@
    hairline uses — the bracket closes. */
 .gtt-lrow.is-parent.is-open::before { background: color-mix(in srgb, var(--accent) 45%, transparent); }
 
-.is-parent .gd-name { font-weight: 800; letter-spacing: 0.01em; }
+/* 700, not 800. The parent row already carries a tint, a top hairline and a leading
+   bar; a heavier name on top of those three was the fourth statement of one fact, and
+   at 11px an 800 weight mostly just fills in the counters. */
+.is-parent .gd-name { font-weight: 700; letter-spacing: 0.005em; }
 .is-child .gd-name { font-weight: 600; color: var(--text-muted); font-size: 11px; }
 /* Child rows are indented and carry a hairline down their left edge, so an opened
    material reads as one block rather than as more top-level rows. */
@@ -336,9 +361,9 @@
   position: absolute; top: 0; bottom: 0;
   display: flex; align-items: center; box-sizing: border-box;
 }
-.gtg { justify-content: flex-start; padding-left: 7px; font-size: 9.5px; font-weight: 800; color: var(--text); border-left: 1px solid var(--border-strong); }
-.gtk { justify-content: center; font-size: 9px; font-weight: 700; color: var(--text-muted); border-left: 1px solid var(--border); }
-.gtk.alt { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.gtg { justify-content: flex-start; padding-left: 8px; font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; color: var(--text); border-left: 1px solid var(--border); }
+.gtk { justify-content: center; font-family: var(--gtt-figs); font-size: 10.5px; font-weight: 500; color: var(--text-muted); border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.gtk.alt { background: color-mix(in srgb, var(--text) 2%, transparent); }
 /* The cursor rail: the header's padding-bottom, tinted a shade deeper so the handle
    reads as running in a track rather than floating over the chart. */
 .gtt-thead::after {
@@ -355,8 +380,8 @@
    the left edge painted it straight over the frozen Material / BOH / In / Out block.
    Sealed here, a bar can raise itself as much as it likes and still never leave its row. */
 .gtt-row { display: flex; flex-direction: column; z-index: 0; }
-.gtt-gl { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); pointer-events: none; }
-.gtt-gl.alt { background: color-mix(in srgb, var(--text) 2%, transparent); }
+.gtt-gl { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border) 55%, transparent); pointer-events: none; }
+.gtt-gl.alt { background: color-mix(in srgb, var(--text) 1.4%, transparent); }
 
 .gtt-lane { position: relative; flex: 0 0 auto; }
 /* Inset, not a border: the lane heights add up to the fixed row height exactly. */
@@ -369,17 +394,32 @@
    All of it is gone: the delivery schedule records no actual-vs-planned pairing, so the
    distinction was asserting a status the data does not hold, and the dashed edge was a
    third variable on a 16px bar. */
+/* A bar is a <button> now — it opens the detail panel, so it has to be reachable by
+   keyboard and announce itself as pressable. That means neutralising the user agent's
+   own button box: padding and appearance would otherwise be added INSIDE the explicit
+   width packTrack computed, and the bar would no longer match the dates it stands for. */
 .gbar {
-  position: absolute; box-sizing: border-box; border-radius: 3px;
+  position: absolute; box-sizing: border-box; border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
-  overflow: hidden; cursor: default;
-  border: 1.5px solid var(--c);
+  overflow: hidden; cursor: pointer;
+  padding: 0; margin: 0; appearance: none; -webkit-appearance: none;
+  font: inherit; text-align: center;
+  border: 1px solid var(--c);
   transition: filter 0.12s ease, box-shadow 0.12s ease;
+}
+.gbar:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; z-index: 2;
 }
 /* z-index 2 is safe ONLY because .gtt-row seals each cell into its own stacking context
    — see the note there. Unsealed, this number escaped the chart and painted a hovered
    bar over the frozen identity columns. */
-.gbar:hover { filter: brightness(1.07); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 38%, transparent); z-index: 2; }
+.gbar:hover { filter: brightness(1.06); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 28%, transparent); z-index: 2; }
+/* The bar whose detail panel is open. A ring rather than a colour change, so the bar
+   still reports its own direction and state while it is selected. */
+.gbar.is-open {
+  z-index: 2;
+  box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3.5px color-mix(in srgb, var(--c) 72%, transparent);
+}
 
 /* On or before today: full strength, because it happened.
    The fill is the direction's colour taken 18% toward black, and that is a CONTRAST
@@ -413,8 +453,17 @@
     transparent 0 3px, color-mix(in srgb, var(--text) 26%, transparent) 3px 6px);
 }
 
+/* WAS 9.5px/800 Montserrat, which read as a slab of ink on a 16px bar — the number
+   shouted louder than the bar it sat on. Now the condensed face at 500: a numeral is
+   still unmistakably a numeral, but it stops competing with the bar for attention.
+   Condensed is also ~15% narrower per digit, so MORE labels now fit INSIDE their bar
+   instead of being pushed outside it — which is the quieter chart as well as the
+   simpler one. CHAR_W in DeliveryGantt.jsx is measured against THIS rule; change the
+   size, the weight or the family and that constant has to be re-measured, or packTrack
+   will reserve the wrong width and labels will collide. */
 .gb-n {
-  font-style: normal; font-size: 9.5px; font-weight: 800;
+  font-family: var(--gtt-figs);
+  font-style: normal; font-size: 11px; font-weight: 500; letter-spacing: 0.015em;
   font-variant-numeric: tabular-nums; white-space: nowrap; padding: 0 3px;
 }
 /* Inside a solid bar the number sits on the direction's own colour, so it takes the
@@ -455,12 +504,13 @@
 /* One bar standing for several. The badge is the only cue that a quantity is a sum, and
    without it a merged bar silently misreports how many deliveries there are. */
 .gb-mult {
-  position: absolute; top: -3px; right: -4px;
-  min-width: 11px; height: 11px; padding: 0 2px;
+  position: absolute; top: -3px; right: -3px;
+  min-width: 10px; height: 10px; padding: 0 2px;
   display: flex; align-items: center; justify-content: center;
-  font-style: normal; font-size: 7.5px; font-weight: 900; line-height: 1;
-  border-radius: 6px;
-  background: var(--text); color: var(--bg-elev);
+  font-family: var(--gtt-figs);
+  font-style: normal; font-size: 8.5px; font-weight: 600; line-height: 1;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 82%, transparent); color: var(--bg-elev);
   box-shadow: 0 0 0 1px var(--surface);
 }
 .gbar-out .gb-mult { top: -4px; }
@@ -518,7 +568,11 @@
    the chart fits the display it covers nothing. */
 .gtt-footbar { position: sticky; bottom: 0; z-index: 7; pointer-events: none; }
 .gtt-capwin {
-  position: absolute; bottom: 8px; transform: translateX(-50%);
+  /* 5px, and it is load-bearing arithmetic: the window is 99px tall, so 99 + 5 =
+     104 = FOOT_H exactly, which is what lets the window sit entirely inside the space
+     reserved for it AND the whole chart still fit the display. At the old 8px it hung
+     3px into the last row. Change either number and re-measure both. */
+  position: absolute; bottom: 5px; transform: translateX(-50%);
   width: 168px; box-sizing: border-box; pointer-events: auto;
   display: flex; flex-direction: column; gap: 1px;
   padding: 6px 9px 7px;
@@ -529,13 +583,16 @@
 }
 .gcw-hd {
   display: flex; align-items: center; gap: 4px;
-  font-size: 8.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-faint);
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted);
 }
-.gcw-m2 { font-size: 18px; font-weight: 800; line-height: 1.05; color: var(--text); font-variant-numeric: tabular-nums; }
-.gcw-m2 em { font-style: normal; font-size: 10px; font-weight: 700; color: var(--text-muted); margin-left: 2px; }
+/* The travelling read-out follows the same rule as every other figure on this card:
+   condensed face, mid weight. At 18px/800 Montserrat it was the heaviest object on the
+   chart, which is the wrong emphasis for the one number that is explicitly provisional. */
+.gcw-m2 { font-family: var(--gtt-figs); font-size: 19px; font-weight: 600; line-height: 1.02; color: var(--text); font-variant-numeric: tabular-nums; }
+.gcw-m2 em { font-family: var(--font); font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--text-muted); margin-left: 3px; }
 .gcw-sub { font-size: 9px; font-weight: 600; color: var(--text-muted); }
-.gcw-net { display: flex; align-items: center; gap: 2px; font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.gcw-net { display: flex; align-items: center; gap: 2px; font-family: var(--gtt-figs); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gcw-net.up { color: var(--gtt-ink-in); }
 .gcw-net.dn { color: var(--green); }
 .gcw-track { display: block; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; margin-top: 2px; }
@@ -561,20 +618,153 @@
    usable. Below 720px it stops sticking altogether and the whole grid pans as one —
    at 375px a 200px frozen block plus EOH would leave the chart barely 100px. */
 @media (max-width: 1100px) {
-  .gtt-root { --gtt-desc: 184px; --gtt-num: 56px; --gtt-min: 54px; --gtt-flow: 70px; --gtt-eoh: 72px; --gtt-maxh: calc(100vh - 210px); }
+  .gtt-root { --gtt-desc: 156px; --gtt-num: 46px; --gtt-min: 42px; --gtt-flow: 56px; --gtt-eoh: 60px; --gtt-maxh: calc(100vh - 210px); }
 }
 @media (max-width: 720px) {
-  .gtt-root { --gtt-desc: 168px; --gtt-num: 52px; --gtt-min: 50px; --gtt-flow: 66px; --gtt-eoh: 66px; --gtt-maxh: calc(100vh - 190px); }
+  .gtt-root { --gtt-desc: 146px; --gtt-num: 44px; --gtt-min: 40px; --gtt-flow: 54px; --gtt-eoh: 56px; --gtt-maxh: calc(100vh - 190px); }
   .gtt-left, .gtt-right { position: relative; left: auto; right: auto; }
   .gtt-corner, .gtt-corner-r { left: auto; right: auto; }
   .gtt-bar { flex-direction: column; align-items: stretch; }
   .gtt-ctl { justify-content: flex-end; }
 }
 @media (max-width: 480px) {
-  .gtt-root { --gtt-desc: 148px; --gtt-num: 48px; --gtt-min: 46px; --gtt-flow: 62px; --gtt-eoh: 60px; }
+  .gtt-root { --gtt-desc: 132px; --gtt-num: 42px; --gtt-min: 38px; --gtt-flow: 52px; --gtt-eoh: 52px; }
   .gtt-legend { gap: 7px 10px; }
   .gl { font-size: 9.5px; }
   .gtt-capwin { width: 140px; padding: 5px 7px 6px; }
   .gcw-m2 { font-size: 15px; }
   .gtt-note { padding: 9px 12px 13px; }
+}
+
+/* ==========================================================================
+   DETAIL PANEL — slides in from the right when a bar is clicked.
+
+   Overlays the chart rather than sitting beside it. Laid out beside it, opening the
+   panel would narrow the timeline and re-scale every bar at the moment of the click —
+   you would press one bar and watch them all move. Overlaying costs some chart width
+   while it is open, and the reader can close it; re-scaling on click has no such
+   escape.
+
+   Anchored to .gtt-root (position: relative there) and NOT to .gtt-scroll, so it does
+   not scroll away with the rows or get clipped by the scrollport's overflow.
+   ========================================================================== */
+.gtt-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 8;
+  width: min(360px, 82%);
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 34px -22px rgba(0, 0, 0, 0.32);
+  animation: gtt-panel-in 0.16s ease-out;
+}
+@keyframes gtt-panel-in { from { transform: translateX(14px); opacity: 0; } }
+/* Respect a reduced-motion preference: the slide is decoration, the panel is content. */
+@media (prefers-reduced-motion: reduce) { .gtt-panel { animation: none; } }
+
+.gp-head {
+  flex: 0 0 auto; display: flex; align-items: flex-start; gap: 10px;
+  padding: 13px 12px 11px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.gp-id { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* The bar's own colour, as a 3px rule down the left edge of the heading — the one place
+   the panel repeats which direction it was opened from. */
+.gp-head { position: relative; }
+.gp-head::before {
+  content: ''; position: absolute; left: 0; top: 12px; bottom: 11px; width: 3px;
+  border-radius: 0 2px 2px 0; background: var(--c);
+}
+.gp-mat {
+  font-size: 13.5px; font-weight: 700; color: var(--text); letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gp-sub { font-size: 10.5px; font-weight: 600; color: var(--text-muted); }
+.gp-x {
+  flex: 0 0 auto; width: 26px; height: 26px; margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted);
+}
+.gp-x:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+
+.gp-top { flex: 0 0 auto; padding: 13px 16px 12px; display: flex; flex-direction: column; gap: 9px; }
+.gp-qty { display: flex; align-items: baseline; gap: 7px; }
+.gp-qty strong {
+  font-family: var(--gtt-figs); font-size: 28px; font-weight: 600; line-height: 1;
+  letter-spacing: 0.01em; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.gp-qty span { font-size: 10.5px; font-weight: 600; color: var(--text-muted); }
+
+.gp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.gp-chip {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em;
+  padding: 3px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-muted);
+}
+/* The two state chips echo the bars: solid-ish for elapsed, washed for still-ahead. */
+.gp-chip.is-past { background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--text); }
+.gp-chip.is-future { background: color-mix(in srgb, var(--c) 9%, transparent); color: var(--text-muted); }
+.gp-chip.is-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
+
+.gp-note {
+  flex: 0 0 auto; margin: 0 16px 10px; padding: 8px 10px;
+  font-size: 10.5px; line-height: 1.45; color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+/* The only scrolling region — the header and the footer stay put. */
+.gp-body { flex: 1 1 auto; overflow-y: auto; padding: 0 16px 14px; }
+.gp-m { padding: 12px 0; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.gp-m:first-child { border-top: none; padding-top: 2px; }
+.gp-m-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+.gp-m-kind { font-size: 11.5px; font-weight: 700; color: var(--text); }
+.gp-m-qty {
+  margin-left: auto; font-family: var(--gtt-figs); font-size: 13.5px; font-weight: 600;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+
+/* A two-column definition list, label left, value right — the densest honest way to
+   show a handful of named facts without drawing a table around them. */
+.gp-kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; margin: 0; }
+.gp-kv dt { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.02em; }
+.gp-kv dd { margin: 0; font-size: 11px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.gp-est { font-style: normal; color: var(--text-muted); font-size: 10px; }
+.gp-rem { color: var(--text-muted); line-height: 1.45; }
+.gp-mono { font-family: 'Consolas', 'SF Mono', monospace; font-size: 10.5px; }
+.gp-dash { color: var(--text-muted); }
+
+.gp-lines { width: 100%; border-collapse: collapse; margin-top: 9px; table-layout: fixed; }
+.gp-lines th {
+  text-align: left; font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-muted);
+  padding: 0 6px 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.gp-lines td {
+  font-size: 10.5px; color: var(--text); padding: 4px 6px 4px 0; vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The description is the one column allowed to wrap — it carries the long source text
+   ("Floor Mounted, Wall Discharge two piece toilet…") and truncating it to one line
+   would lose the part that identifies the fixture. */
+.gp-lines td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; color: var(--text-muted); }
+.gp-lines th.n, .gp-lines td.n {
+  text-align: right; width: 62px; padding-right: 0;
+  font-family: var(--gtt-figs); font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-foot {
+  flex: 0 0 auto; padding: 9px 16px 11px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  background: var(--surface);
+}
+
+/* On a phone the panel takes the whole card — a 360px drawer over a 375px viewport
+   leaves a 15px sliver of chart, which is neither one thing nor the other. */
+@media (max-width: 620px) {
+  .gtt-panel { width: 100%; border-left: none; }
 }

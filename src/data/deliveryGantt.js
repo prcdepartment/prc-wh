@@ -392,7 +392,11 @@ function buildLeafRows() {
         // product this batch is, on a row whose title is the shared material name.
         sourceItem: d.item, brand: d.brand || '',
         uom: d.uom && d.uom !== 'TBC' ? d.uom : '',
-        status: d.status, location: d.location,
+        // `warehouse` is the sheet's DELIVERY LOCATION — where the batch is bound, which
+        // is not always the warehouse: several batches go straight to the project site.
+        // Carried onto the bar for the detail panel, where "deliver to" is the question
+        // a reader opening a bar most often has.
+        status: d.status, location: d.location, warehouse: d.warehouse,
         opsRemarks: d.opsRemarks, prcRemarks: d.prcRemarks, dpPayment: d.dpPayment,
         targetText: d.targetText, targetDate: d.targetDate,
         lines: [],

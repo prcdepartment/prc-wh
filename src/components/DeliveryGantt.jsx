@@ -43,16 +43,34 @@ const HEAD_BANDS = 40
 const CURSOR_RAIL = 22 // kept in step with .gtt-thead::after in gantt.css
 const HEAD_H = HEAD_BANDS + CURSOR_RAIL
 
-// Quantity-label width. The numbers render at 9.5px/800 with tabular-nums, so every
-// digit is the same width and a per-character figure is exact — measured at 7.2px/char.
-const CHAR_W = 7.3
+// Quantity-label width, and it is MEASURED, not estimated — packTrack reserves space
+// with it, so an under-estimate puts two numbers on top of each other.
+//
+// Re-measured 2026-09-11 when the bar quantity moved to Barlow Condensed 11px/500 (it
+// was Montserrat 9.5px/800 at 7.3px per character). Taken off the rendered DOM across
+// all 72 on-screen labels: a digit is 5.20px wide and a comma less, so the widest case
+// is an all-digit string. 5.25 rounds that up, which is the safe direction — over-
+// reserving leaves a small gap, under-reserving collides.
+//
+// Change the size, weight or family of `.gb-n` in gantt.css and this must be measured
+// again. The narrower face is also why far more labels now sit INSIDE their bar.
+const CHAR_W = 5.25
 const LABEL_PAD = 7
 const labelWidth = (txt) => txt.length * CHAR_W + LABEL_PAD
 
 const CAPWIN_W = 168
-// Height reserved for the capacity window at the end of the content, measured against
-// what the window actually renders (~92px plus its 8px offset). Because that space is
-// real, the window covers nothing whenever the chart fits the display.
+// Height reserved for the capacity window at the end of the content, so that a window
+// pinned to the bottom of the scrollport covers no row once the chart fits the display.
+//
+// 104 is not a round number, it is an exact fit, and it is pinned at BOTH ends:
+//   * the chart must still fit the scrollport, which caps out at 650px of usable height
+//     — and rows + header + FOOT_H comes to exactly 650 at 104. Raising it to 112 (tried
+//     on 2026-09-11) pushed the content to 658 and the chart started scrolling, losing
+//     the "fits and maximises within the display" property this card was built for;
+//   * the window must fit inside it — 99px tall plus its 5px bottom offset = 104.
+//
+// So the window's `bottom` in gantt.css and its rendered height are both part of this
+// arithmetic. Change the read-out's type and all three have to be re-measured together.
 const FOOT_H = 104
 
 const SAFEKEEPING_M2 = whAreaM2(WH_AREAS.find((a) => a.id === 'safekeeping'))
@@ -240,9 +258,10 @@ function itemTitle(item, row) {
   return lines.join('\n')
 }
 
-function Bar({ item, row, colour }) {
+function Bar({ item, row, colour, barKey, isOpen, onOpen }) {
   return (
-    <span
+    <button
+      type="button"
       className={[
         'gbar', item.past ? 'is-past' : 'is-future',
         item.qty == null ? 'gbar-tbc' : '',
@@ -250,13 +269,130 @@ function Bar({ item, row, colour }) {
         item.inside ? '' : 'gbar-out',
         item.inside ? '' : (item.leftSide ? 'lbl-left' : 'lbl-right'),
         item.members.length > 1 ? 'is-merged' : '',
+        isOpen ? 'is-open' : '',
       ].filter(Boolean).join(' ')}
       style={{ left: item.x, width: item.w, top: BAR_TOP, height: BAR_H, '--c': colour }}
+      // The tooltip stays. The panel is for reading the whole delivery; the tooltip is
+      // still the fastest way to identify a bar you are only passing over.
       title={itemTitle(item, row)}
+      aria-expanded={isOpen}
+      onClick={() => onOpen({ key: barKey, item, row, colour })}
     >
       <em className="gb-n">{item.label}</em>
       {item.members.length > 1 && <i className="gb-mult" aria-hidden="true">{item.members.length}</i>}
-    </span>
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DETAIL PANEL — what a bar is actually made of.
+//
+// A bar can stand for one delivery or for several merged at this zoom, and each
+// delivery can itself hold many line items (the door types, window types and fixtures
+// inside one batch). None of that fits in a tooltip, and the tooltip was already
+// truncating at 8 members and dropping every line item. This is where it goes.
+//
+// Everything here is read off the bar's own members, so the panel can never disagree
+// with the bar it was opened from.
+function memberWhen(m) {
+  if (m.kind !== 'planned') return fmtDate(m.start)
+  if (m.targetDate) return fmtDate(new Date(`${m.targetDate}T00:00:00`))
+  return fmtTargetText(m.targetText) || 'No target date'
+}
+
+function DetailPanel({ open, onClose }) {
+  if (!open) return null
+  const { item, row, colour } = open
+  const members = item.members
+  const lineCount = members.reduce((a, m) => a + (m.lines?.length || 0), 0)
+
+  return (
+    <aside className="gtt-panel" role="dialog" aria-label="Delivery detail" style={{ '--c': colour }}>
+      <header className="gp-head">
+        <div className="gp-id">
+          <span className="gp-mat">{row.materialName}</span>
+          {/* A child row IS a project, so name it; a parent row spans several. */}
+          <span className="gp-sub">{row.isParent ? `${row.projectCount || 1} project${(row.projectCount || 1) === 1 ? '' : 's'}` : row.project}</span>
+        </div>
+        <button type="button" className="gp-x" onClick={onClose} aria-label="Close">
+          <Icon name="close" size={14} />
+        </button>
+      </header>
+
+      <div className="gp-top">
+        <div className="gp-qty">
+          <strong>{item.qty == null ? 'TBC' : num(item.qty)}</strong>
+          <span>{item.qty == null ? 'no agreed quantity' : (row.uom || 'units')}</span>
+        </div>
+        <div className="gp-chips">
+          <span className={`gp-chip ${item.past ? 'is-past' : 'is-future'}`}>
+            {item.past ? 'On or before today' : 'Still ahead'}
+          </span>
+          {members.length > 1 && <span className="gp-chip">{members.length} deliveries merged at this zoom</span>}
+          {item.tbcCount > 0 && <span className="gp-chip is-warn">{item.tbcCount} without a quantity</span>}
+        </div>
+      </div>
+
+      {members.length > 1 && (
+        <p className="gp-note">
+          These overlap at this zoom and are drawn as one bar. Switch the timeline to
+          Week or Day to separate them.
+        </p>
+      )}
+
+      <div className="gp-body">
+        {members.map((m, i) => (
+          <section className="gp-m" key={i}>
+            <div className="gp-m-head">
+              <span className="gp-m-kind">{m.kind === 'planned' ? (m.batch || 'Scheduled') : 'Received'}</span>
+              <span className="gp-m-qty">{m.qty == null ? 'TBC' : num(m.qty)}{m.uom ? ` ${m.uom}` : ''}</span>
+            </div>
+            <dl className="gp-kv">
+              <dt>{m.kind === 'planned' ? 'Target' : 'Date'}</dt>
+              <dd>
+                {memberWhen(m)}
+                {m.kind === 'planned' && !m.targetDate && m.targetText && (
+                  <em className="gp-est"> estimate — the bar spans the window the source commits to</em>
+                )}
+              </dd>
+              {m.kind === 'planned' && m.sourceItem && (<><dt>Item</dt><dd>{m.sourceItem}</dd></>)}
+              {m.kind === 'planned' && m.location && (<><dt>Tower</dt><dd>{fmtTower(m.location)}</dd></>)}
+              {m.kind === 'planned' && m.warehouse && (<><dt>Deliver to</dt><dd>{m.warehouse}</dd></>)}
+              {m.kind === 'planned' && m.dpPayment && (<><dt>DP</dt><dd>{m.dpPayment}</dd></>)}
+              {m.kind !== 'planned' && m.docRef && (<><dt>Reference</dt><dd className="gp-mono">{m.docRef}</dd></>)}
+              {m.kind !== 'planned' && m.codes?.length > 0 && (<><dt>Item codes</dt><dd className="gp-mono">{m.codes.join(', ')}</dd></>)}
+              {m.opsRemarks && (<><dt>Ops</dt><dd className="gp-rem">{m.opsRemarks}</dd></>)}
+              {m.prcRemarks && (<><dt>PRC</dt><dd className="gp-rem">{m.prcRemarks}</dd></>)}
+            </dl>
+
+            {/* The line items inside this delivery — the level the 2026-09-10 workbook
+                added and nothing on the card could show until now. */}
+            {m.lines?.length > 0 && (
+              <table className="gp-lines">
+                <thead>
+                  <tr><th>Designation</th><th>Description</th><th className="n">Qty</th></tr>
+                </thead>
+                <tbody>
+                  {m.lines.map((l, j) => (
+                    <tr key={j}>
+                      <td>{l.designation || <span className="gp-dash">—</span>}</td>
+                      <td title={l.description2}>{l.description2 || <span className="gp-dash">—</span>}</td>
+                      <td className="n">{l.qty == null ? 'TBC' : num(l.qty)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        ))}
+      </div>
+
+      <footer className="gp-foot">
+        {lineCount > 0
+          ? `${members.length} deliver${members.length === 1 ? 'y' : 'ies'} · ${lineCount} line item${lineCount === 1 ? '' : 's'}`
+          : `${members.length} deliver${members.length === 1 ? 'y' : 'ies'}`}
+      </footer>
+    </aside>
   )
 }
 
@@ -294,11 +430,30 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const [dragging, setDragging] = useState(false)
   const [expanded, setExpanded] = useState(() => new Set())
   const [hover, setHover] = useState(null)
+  // The bar whose detail panel is open, or null. Holds the item itself rather than an
+  // index, so a re-layout (a zoom change, a filter, opening a material) cannot leave the
+  // panel pointing at a different delivery than the one that was clicked.
+  const [openBar, setOpenBar] = useState(null)
 
   // How stale the recorded side is. The safekeeping sheets are a snapshot, so the
   // stretch between that date and today carries no receipts or pullouts — and an empty
   // stretch to the LEFT of the line must not read as "nothing moved".
   const lag = snapshotLag(TODAY, today)
+
+  // Escape closes the panel. Bound while it is open only, so this card does not swallow
+  // Escape from anything else on the dashboard the rest of the time.
+  useEffect(() => {
+    if (!openBar) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setOpenBar(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openBar])
+
+  // A re-layout can remove the bar the panel is showing — switching to Out mode drops
+  // every in-lane bar, a filter can drop the row, a zoom change re-merges bars into
+  // different groups. Close rather than leave the panel showing a delivery that is no
+  // longer on the chart.
+  useEffect(() => { setOpenBar(null) }, [unit, mode, parents])
 
   // How many scheduled deliveries have no target date at all, counted over PARENTS (a
   // parent already sums its children, so adding the opened rows would double it).
@@ -595,12 +750,20 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                     {ticks.map((t, k) => <span key={t.key} className={`gtt-gl ${k % 2 ? 'alt' : ''}`} style={{ left: k * colWidth, width: colWidth }} />)}
                     {L.showIn && (
                       <div className="gtt-lane gtt-lane-in" style={laneStyle}>
-                        {L.inItems.map((it, bi) => <Bar key={`i${bi}`} item={it} row={r} colour={IN_C} />)}
+                        {L.inItems.map((it, bi) => (
+                          <Bar key={`i${bi}`} item={it} row={r} colour={IN_C}
+                            barKey={`${r.key}|in|${bi}`} isOpen={openBar?.key === `${r.key}|in|${bi}`}
+                            onOpen={setOpenBar} />
+                        ))}
                       </div>
                     )}
                     {L.showOut && (
                       <div className="gtt-lane gtt-lane-out" style={laneStyle}>
-                        {L.outItems.map((it, bi) => <Bar key={`o${bi}`} item={it} row={r} colour={OUT_C} />)}
+                        {L.outItems.map((it, bi) => (
+                          <Bar key={`o${bi}`} item={it} row={r} colour={OUT_C}
+                            barKey={`${r.key}|out|${bi}`} isOpen={openBar?.key === `${r.key}|out|${bi}`}
+                            onOpen={setOpenBar} />
+                        ))}
                       </div>
                     )}
                   </div>
@@ -658,6 +821,13 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
           </div>
         </div>
       )}
+
+      {/* The detail panel is a sibling of the SCROLLPORT, never a child of it: inside,
+          it would scroll away with the rows and be clipped by the scrollport's own
+          overflow. It overlays the right-hand edge of the chart instead, so opening it
+          never reflows the timeline underneath — a panel that pushed the chart would
+          re-scale every bar the moment you clicked one. */}
+      <DetailPanel open={openBar} onClose={() => setOpenBar(null)} />
 
       <p className="gtt-note">
         <Icon name="alert" size={12} />

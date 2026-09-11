@@ -1,7 +1,17 @@
-// Delivery Tracker — sourced entirely from the real "Warehouse Schedule" sheet in
-// sample/MCC. PRC. OSM Delivery Tracker - Presentation.xlsx (see
-// deliveryTrackerSheet.js for the generator). No seeded/fabricated rows: this is the
-// company's own scheduling snapshot, reproduced as authored.
+// Delivery Tracker — sourced entirely from the "Target Delivery" sheet of
+// sample/MCC. PRC. OSM Delivery Tracker - Presentation 2.xlsx (see
+// scripts/import-delivery-tracker.mjs for the reading rules and deliveryTrackerSheet.js
+// for the generated module). No seeded or fabricated rows: this is the company's own
+// scheduling snapshot, reproduced as authored and narrowed to the deliveries bound for
+// the central warehouse — see WAREHOUSE_BOUND below.
+//
+// THIS WORKBOOK IS THE TRACKER'S ONLY DATA SOURCE. It used to be joined to the
+// safekeeping stock sheets for opening stock, recorded receipts and real item codes;
+// that join was removed on 2026-09-11 so the card reports the delivery schedule and
+// nothing else. The consequences are real and are surfaced on the card rather than
+// hidden: there is no opening stock, so BOH is 0 on every row; there are no recorded
+// receipts, so every bar is a scheduled one; and there is no outbound, so the out lane
+// is empty everywhere.
 import { DELIVERY_TRACKER_ROWS } from './deliveryTrackerSheet'
 
 // The sheet's CATEGORY column carries the trade, spelled in the tracker's own shorthand.
@@ -35,80 +45,89 @@ const PROJECT_NAME_BY_CODE = {
 
 // The schedule's item strings are informal and bundle a brand in parentheses. This
 // splits each into a proper material NAME + BRAND (+ optional detail), confirmed with
-// the procurement team, and carries a `match` keyword the tracker uses to resolve a
-// representative item code from the item master at runtime (the sheet has no code of
-// its own, and codes are not shipped in this public repo — see ItemLookup.jsx).
+// the procurement team.
 //
-// `sk` is the join into the safekeeping sheets, which is what gives a scheduled
-// material its REAL item codes, its beginning-on-hand and its already-recorded
-// deliveries and pullouts. It is a list of description keywords rather than item
-// codes, for the same reason `match` is: no item code is committed to this public
-// repository, so the codes are resolved at runtime from the rows themselves.
-// `skNot` excludes a near-miss the keyword would otherwise sweep in.
+// THE SAFEKEEPING KEYWORDS ARE GONE. Each entry used to carry an `sk` list that joined
+// the material to the safekeeping stock sheets, which is how the chart got its opening
+// stock, its recorded receipts and its real item codes. The tracker is now built from
+// the delivery workbook ALONE (2026-09-11), so that join — and the keywords that
+// described it — no longer exist. `match` stays: it resolves a representative item code
+// from the item master at runtime for the Table view's Item Code column, which is a
+// display lookup against the item catalogue, not a second source of schedule data.
 //
-// SIX of the thirteen materials resolve to NOTHING in safekeeping, and that is the
-// data rather than an unfinished mapping. Checked keyword by keyword against the
-// 2026-09-07 safekeeping sheets: nothing described as a sealant, a wooden door, a wire,
-// a cable, a panel board, an IMC pipe, a conduit or a genset has ever been booked in.
-// Those rows carry a schedule with no stock history behind it, so their BOH is 0 and
-// their bars all sit to the right of today — which is exactly what the schedule says
-// about them. Each still carries the keywords that WOULD describe it, so the join
-// starts working by itself the first time such stock is received; what must not happen
-// is a near-miss keyword added to make a row look populated.
-//
-// The splice-sleeve grouts (SS Mortar Grout, GRW MC7-8) are deliberately NOT folded
-// into "Rebar Coupler & Accessories" — they are a separate consumable, and claiming
-// them as coupler stock would overstate it. Fold them in here if procurement says they
-// belong to the same package.
-//
-// AGW is the schedule's own shorthand for the aluminium-and-glass package, and the
-// 2026-09-10 workbook writes it two ways — "AGW (Jia Hua)" on four projects and
-// "AGW Sicher Aluminum" on Southscape. Same material, two suppliers, so both map to
-// the material name Aluminum with the brand carrying the difference, and both take the
-// keyword set that was already verified for the Sicher rows: the sheets describe this
-// stock by what it is (casement window, awning window, sliding door), never by
-// supplier, so widening the keywords for the new string would change what the existing
-// row reports for reasons that have nothing to do with the new data.
+// The two AGW strings still collapse to one material. "AGW (Jia Hua)" and "AGW Sicher
+// Aluminum" are the same aluminium-and-glass package from two suppliers, so the brand
+// carries the difference. (Every Jia Hua delivery is site-bound, so only the Sicher rows
+// survive the warehouse filter above — but the mapping stays correct either way.)
 const MATERIAL_MAP = {
-  'Rebar Coupler & Accessories (Splice Sleeve)': { name: 'Rebar Coupler & Accessories', brand: 'Splice Sleeve', detail: '', match: 'coupler', sk: ['splice sleeve'] },
-  'AGW (Jia Hua)': { name: 'Aluminum', brand: 'Jia Hua', detail: 'Aluminium & glass', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
-  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: 'Aluminium & glass', match: 'aluminum panel', sk: ['casement window', 'awning window', 'sliding door'], skNot: ['lockset'] },
-  'KITCHEN CABINET': { name: 'Kitchen Cabinet', brand: '', detail: '', match: 'kitchen cabinet', sk: ['kitchen cabinet'] },
-  'KITO SEALANT (Interior)': { name: 'Sealant', brand: 'Kito', detail: 'Interior', match: 'sealant', sk: ['sealant'] },
-  'PENGUIN SEALANT (Exterior)': { name: 'Sealant', brand: 'Penguin', detail: 'Exterior', match: 'sealant', sk: ['sealant'] },
-  'Plumbing Fixtures (Laviya)': { name: 'Plumbing Fixtures', brand: 'Laviya', detail: '', match: 'lavatory', sk: ['bidet', 'mirror', 'water closet', 'shower head', 'shower set', 'kitchen sink', 'faucet', 'floor drain'] },
-  'SPC Flooring Yekalon': { name: 'SPC Flooring', brand: 'Yekalon', detail: '', match: 'spc flooring', sk: ['spc flooring'] },
-  'WIRING DEVICES (Lonon)': { name: 'Wiring Devices', brand: 'London', detail: '', match: 'convenience outlet', sk: ['convenience outlet', 'way switch', 'cover plate'] },
-  'Wires & Cables Panel Boards': { name: 'Wires & Cables', brand: '', detail: 'Panel boards', match: 'thhn', sk: ['wire', 'cable', 'panel board'] },
-  'IMC PIPE (Electrical Conduits)': { name: 'IMC Pipe', brand: '', detail: 'Electrical conduits', match: 'imc pipe', sk: ['imc pipe', 'electrical conduit'] },
-  GENSET: { name: 'Genset', brand: '', detail: '', match: 'generator', sk: ['genset', 'generator set'] },
-  'Wooden Door (Seyken)': { name: 'Wooden Door', brand: 'Seyken', detail: '', match: 'wooden door', sk: ['wooden door', 'flush door'] },
+  'Rebar Coupler & Accessories (Splice Sleeve)': { name: 'Rebar Coupler & Accessories', brand: 'Splice Sleeve', detail: '', match: 'coupler' },
+  'AGW (Jia Hua)': { name: 'Aluminum', brand: 'Jia Hua', detail: 'Aluminium & glass', match: 'aluminum panel' },
+  'AGW Sicher Aluminum': { name: 'Aluminum', brand: 'Sicher', detail: 'Aluminium & glass', match: 'aluminum panel' },
+  'KITCHEN CABINET': { name: 'Kitchen Cabinet', brand: '', detail: '', match: 'kitchen cabinet' },
+  'KITO SEALANT (Interior)': { name: 'Sealant', brand: 'Kito', detail: 'Interior', match: 'sealant' },
+  'PENGUIN SEALANT (Exterior)': { name: 'Sealant', brand: 'Penguin', detail: 'Exterior', match: 'sealant' },
+  'Plumbing Fixtures (Laviya)': { name: 'Plumbing Fixtures', brand: 'Laviya', detail: '', match: 'lavatory' },
+  'SPC Flooring Yekalon': { name: 'SPC Flooring', brand: 'Yekalon', detail: '', match: 'spc flooring' },
+  'WIRING DEVICES (Lonon)': { name: 'Wiring Devices', brand: 'London', detail: '', match: 'convenience outlet' },
+  'Wires & Cables Panel Boards': { name: 'Wires & Cables', brand: '', detail: 'Panel boards', match: 'thhn' },
+  'IMC PIPE (Electrical Conduits)': { name: 'IMC Pipe', brand: '', detail: 'Electrical conduits', match: 'imc pipe' },
+  GENSET: { name: 'Genset', brand: '', detail: '', match: 'generator' },
+  'Wooden Door (Seyken)': { name: 'Wooden Door', brand: 'Seyken', detail: '', match: 'wooden door' },
 }
 
 // Filled in place by rebuildDeliveryRows() so consumers keep a live reference
 // after src/lib/hydrate.js swaps in the rows from Postgres.
 export const deliveryRows = []
 
+// ---------------------------------------------------------------------------
+// WAREHOUSE-BOUND ONLY.
+//
+// The schedule covers deliveries to several destinations — the central warehouse, and a
+// number of project sites the supplier ships to directly. This card is the WAREHOUSE's
+// tracker, so only the warehouse-bound rows belong on it; a pallet going straight from
+// the supplier to Jab Residences never touches Taytay and is not this warehouse's to
+// plan for.
+//
+// The source writes the destination two ways, "Taytay Central Warehouse" and plain
+// "Central Warehouse", and both mean the same building. Matched case-insensitively on
+// either form rather than on an exact string, because that column is typed by hand.
+//
+// What this drops, measured on the 2026-09-10 workbook: 268 of 355 line items, leaving
+// 87 across 7 materials and 5 projects. Six materials disappear entirely — AGW (Jia
+// Hua), Penguin Sealant, SPC Flooring, Wires & Cables, IMC Pipe and Genset — because
+// every one of their deliveries is site-bound. 99 of the dropped rows have NO
+// destination recorded at all; a blank is not the warehouse, so they go too, and
+// `deliveryExcluded` reports the count so the card can say how much it is not showing.
+const WAREHOUSE_BOUND = /taytay\s+central\s+warehouse|central\s+warehouse/i
+export const isWarehouseBound = (r) => WAREHOUSE_BOUND.test(String(r.warehouse || ''))
+
+// How many source rows the destination filter removed, and how many of those were blank
+// rather than site-bound. Read by the card's footnote — a filter this large must not be
+// silent.
+export const deliveryExcluded = { total: 0, blank: 0, siteBound: 0, source: 0 }
+
 export function rebuildDeliveryRows() {
   deliveryRows.length = 0
+  const kept = DELIVERY_TRACKER_ROWS.filter(isWarehouseBound)
+  deliveryExcluded.source = DELIVERY_TRACKER_ROWS.length
+  deliveryExcluded.total = DELIVERY_TRACKER_ROWS.length - kept.length
+  deliveryExcluded.blank = DELIVERY_TRACKER_ROWS.filter((r) => !isWarehouseBound(r) && !String(r.warehouse || '').trim()).length
+  deliveryExcluded.siteBound = deliveryExcluded.total - deliveryExcluded.blank
   deliveryRows.push(
-    ...DELIVERY_TRACKER_ROWS.map((r) => {
+    ...kept.map((r) => {
       const m = MATERIAL_MAP[r.item] || {}
       return {
         ...r,
         trade: TRADE_BY_CATEGORY[r.category] || r.category,
         project: PROJECT_NAME_BY_CODE[r.project] || r.project,
-        // The sheet's own short code is KEPT alongside the proper name: the Gantt joins
-        // this schedule to the safekeeping sheets, whose project names are written
-        // loosely ('Jab Residences' vs '4PH Jab Greenwoods Dasmariñas'), and the code is
-        // the only stable key both sides share. See SK_PROJECT_KEY in deliveryGantt.js.
+        // The sheet's own short code is KEPT alongside the proper name. It used to be the
+        // bridge to the safekeeping sheets; it is now simply the stable per-project key
+        // the Gantt groups and keys its rows by, which a display name should not be.
         projectCode: r.project,
         materialName: m.name || r.item,
         brand: m.brand || '',
         matDetail: m.detail || '',
         matchKey: m.match || '',
-        skKeys: m.sk || [],
-        skNot: m.skNot || [],
       }
     })
   )

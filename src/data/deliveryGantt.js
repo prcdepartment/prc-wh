@@ -1,81 +1,33 @@
 // Delivery Tracker — Gantt model.
 //
-// The tracker card used to be one flat table of the "Warehouse Schedule" sheet. This
-// module turns that schedule into a timeline by joining it to the two things the sheet
-// itself does not carry: what is already ON HAND, and what has ALREADY moved.
+// ONE SOURCE. This module turns the delivery schedule into a timeline, and the schedule
+// is all it reads: src/data/deliveryTracker.js, which is the "Target Delivery" sheet of
+// the OSM Delivery Tracker workbook, narrowed to the rows bound for the central
+// warehouse.
 //
-//   PLAN     src/data/deliveryTracker.js  — 27 scheduled deliveries (material x project
-//            x batch), each with a target date or a free-text estimate. Future-facing.
-//   ACTUAL   src/data/safekeeping.js      — `incoming` and `outgoing`, every recorded
-//            receipt and pullout with a real date, a document reference and a real
-//            item code. Past-facing.
-//   OPENING  src/data/safekeeping.js      — `soh`, whose `boh` column is the beginning
-//            on-hand figure the left-hand BOH column reports.
+// It used to join two more — safekeeping's `soh` for an opening position and its
+// `incoming`/`outgoing` for recorded movement — which is where BOH, the recorded bars
+// and the real item codes came from. That join was removed on 2026-09-11 at
+// procurement's request, so the card now reports the schedule and nothing else. Three
+// consequences follow, and all three are stated on the card rather than papered over:
 //
-// Both sides describe the same warehouse (Taytay Central), the same five projects and
-// the same materials, so the join is a real one rather than a convenience. The tracker
-// names its projects by an informal code and its materials by an informal string; the
-// safekeeping sheets name projects loosely and materials by item code. SK_PROJECT_KEY
-// and MATERIAL_MAP.sk (in deliveryTracker.js) are the two bridges.
+//   * BOH is 0 on every row. The workbook records no opening stock, so there is no
+//     honest figure to put there.
+//   * Every bar is a SCHEDULED delivery. There are no recorded receipts to draw, so the
+//     solid/faded distinction now reads purely as "target has passed" vs "still ahead".
+//   * The out lane is empty on every row, as it always was — no source in this system
+//     schedules a release — and now there are not even recorded pullouts to fill it.
 //
 // ---------------------------------------------------------------------------
 // WHY THE In / Out COLUMNS ARE DERIVED FROM THE BARS
 //
 // The requirement is that every bar carries a number and those numbers sum to the row's
 // In / Out column. That can only hold if the columns ARE the sum of the bars, so they
-// are computed here from the bar list and never read from the safekeeping sheet's own
-// `in` / `out` totals.
-//
-// That is not a stylistic choice. Checked against the 2026-09-07 snapshot, the SOH
-// sheet's own `in` disagrees with the sum of its dated Incoming rows on 29 of 67
-// project+code pairs — Avesta's formwork lines carry an `in` total with no dated rows
-// behind it at all, and Jab's wiring devices carry the same quantity as `boh` instead.
-// Those totals cover a different period from the dated sheets. Presenting the sheet
-// total next to bars that add up to something else would show an arithmetic error on
-// the face of the card.
-//
-// ---------------------------------------------------------------------------
-// AND WHY BOH IS DERIVED TOO
-//
-// The sheet's own `boh` column cannot be used either, and this one is a trap worth
-// spelling out. For Jab's wiring devices the safekeeping sheet reports boh = 10,064
-// with in = 0 — while the Incoming sheet separately carries 10,064 dated units of the
-// same six codes. Both describe ONE arrival. Taking the sheet's boh and then adding
-// the dated receipts on top counts that stock twice, and the first build of this card
-// did exactly that: BOH 10,064 + In 10,064 = EOH 20,028 for stock that only ever
-// arrived once.
-//
-// The sheet's "beginning" is the start of ITS period, which is not the start of this
-// timeline. What the left-hand edge of a Gantt needs is the position before the first
-// bar on it, so BOH is wound back from the sheet's closing position instead:
-//
-//     BOH = sheet SOH - (every dated receipt) + (every dated pullout)
-//
-// which makes the whole row reconcile: at the right-hand end of the timeline,
-// EOH = sheet SOH + everything still scheduled. Jab's wiring devices come out at
-// BOH 0 — correct, the stock was not there before the window, it arrived inside it.
-//
-// Where the sheet's totals and its dated rows disagree badly enough that this goes
-// NEGATIVE, the value is clamped to zero and the row is flagged `bohAdjusted`; the
-// card shows a marker and the tooltip says the source does not reconcile. Hiding it
-// silently would be the one unacceptable option.
+// are computed here from the bar list rather than from any total stated elsewhere.
+// Undated deliveries are excluded and reported separately — see finalise().
 // ---------------------------------------------------------------------------
 
 import { deliveryRows } from './deliveryTracker'
-import { soh, incoming, outgoing } from './safekeeping'
-
-// ---------------------------------------------------------------------------
-// Project bridge. The tracker's own sheet code is the only stable key the two sides
-// share; each value is a lower-case substring test against the safekeeping sheet's
-// free-text project name. Verified unique against the 11 project names in the
-// safekeeping sheets — no keyword matches two projects.
-export const SK_PROJECT_KEY = {
-  AVESTA: 'avesta',
-  JABS: 'jab',
-  JENARA: 'jenara',
-  STREVI: 'strevi',
-  Southscape: 'southscape',
-}
 
 const DAY = 86400000
 
@@ -97,13 +49,6 @@ const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1)
 // loads and would be stale for anyone who leaves the tab open overnight. The component
 // memoises it per mount and re-arms itself at midnight.
 export const ganttToday = () => startOfDay(new Date())
-
-// How far the recorded side lags the real today. The safekeeping sheets are a snapshot,
-// so between that date and now the chart has no receipts or pullouts to show — and an
-// empty stretch left of the today line must read as "not yet exported", never as
-// "nothing moved". The card prints this.
-export const snapshotLag = (snapshot, now = ganttToday()) =>
-  Math.max(0, Math.round((startOfDay(now) - startOfDay(snapshot)) / DAY))
 
 // ---------------------------------------------------------------------------
 // QUANTITY. The sheet's Qty column is free text: a plain number on most rows, "TBC"
@@ -235,82 +180,76 @@ export const unitsPerPallet = (materialName, uom) =>
   || DEFAULT_UNITS_PER_PALLET
 
 // ---------------------------------------------------------------------------
-// MINIMUM STOCK LEVEL — the buffer the warehouse should not go below.
+// MINIMUM STOCK LEVEL — MODELLED, NOT RECORDED. Flagged as such on every cell.
 //
-// NOTHING IN ANY SOURCE RECORDS ONE. Searched for it before building the column:
-// zero matches for "minimum", "min stock", "reorder", "safety stock", "buffer" or
-// "par level" anywhere in the 2026-09-10 delivery workbook, and no min-like header on
-// any of the seven sheets of the 2026-09-07 stock workbook either. So the column is
-// real, it is fed from here, and it is EMPTY — every row shows an em dash and says why
-// in its tooltip.
+// Nothing in any source records a minimum: zero matches for "minimum", "min stock",
+// "reorder", "safety stock", "buffer" or "par level" anywhere in the delivery workbook,
+// and no such column on any sheet of the stock workbook either. Procurement asked for a
+// modelled figure "based on the scale and scope of the projects" so the column has
+// something to work against until real levels are set, so that is exactly what this is
+// — a model, derived from the schedule itself, and it must never be mistaken for a
+// figure the warehouse has agreed.
 //
-// There is a number called `minLevel` on every inventory line and it must NOT be used
-// for this. It is synthesized by the importer (`1 + Math.floor(rnd() * 20)`), so
-// wiring it in would print an invented reorder point on a procurement card, which is
-// precisely the class of fabrication this app has spent several sessions removing.
-// A dash that says "not recorded" is worth more than a number that is not true.
+// THE MODEL. A material's buffer should scale with how much of it that project is
+// actually taking, so the input is the row's own total scheduled quantity — the only
+// measure of project scale this source contains:
 //
-// TO FILL IT IN: add entries below, keyed by the material name MATERIAL_MAP produces
-// (Rebar Coupler & Accessories, Wooden Door, Plumbing Fixtures, Aluminum, Kitchen
-// Cabinet, Sealant, SPC Flooring, Wiring Devices, Wires & Cables, IMC Pipe, Genset).
-// A number here is read as units in that material's own UOM. Per-project levels can be
-// keyed 'Material|PROJECTCODE' and take precedence; that is why the lookup takes both.
-const MIN_STOCK_LEVEL = {
-  // 'Rebar Coupler & Accessories': 0,
+//     minimum  =  roundToPlanningStep( total scheduled x COVER )
+//
+// COVER is 15%, which is roughly the share one delivery represents on a typical row
+// here (the median row carries six or seven batches). The result is rounded to a
+// sensible planning step rather than left as a raw fraction, because "1,250" reads as a
+// figure somebody chose and "1,247" reads as one a spreadsheet produced — and the
+// rounding is what keeps this visibly a policy number rather than a measurement.
+//
+// Deliberately NOT used: the `minLevel` on every inventory line. That one is synthesized
+// by the stock importer (`1 + Math.floor(rnd() * 20)`) and bears no relation to the
+// material, so wiring it in would be worse than this — a random number wearing the
+// costume of a real one.
+//
+// TO REPLACE WITH REAL FIGURES: put them in MIN_STOCK_OVERRIDE below, keyed by the
+// material name MATERIAL_MAP produces, or by 'Material|PROJECTCODE' for a per-project
+// level. Anything listed there wins over the model, and a row using a real figure stops
+// being flagged as modelled.
+const MIN_STOCK_COVER = 0.15
+
+// Real, agreed levels go here and take precedence over the model. Empty today.
+const MIN_STOCK_OVERRIDE = {
+  // 'Rebar Coupler & Accessories': 500,
+  // 'Plumbing Fixtures|JABS': 1200,
 }
 
-export const minStockLevel = (materialName, projectCode) => {
-  const scoped = MIN_STOCK_LEVEL[`${materialName}|${projectCode || ''}`]
-  if (Number.isFinite(scoped)) return scoped
-  const general = MIN_STOCK_LEVEL[materialName]
-  return Number.isFinite(general) ? general : null
+// Round to a step a planner would actually write down: 5s below 100, 10s below 500,
+// 50s below 2,000, 100s above that.
+function planningStep(n) {
+  if (n <= 0) return 0
+  const step = n < 100 ? 5 : n < 500 ? 10 : n < 2000 ? 50 : 100
+  return Math.max(step, Math.round(n / step) * step)
 }
 
-// True while the table is empty, so the card can state the gap once in its footnote
-// instead of repeating it on seventeen rows.
-export const hasMinStockData = Object.keys(MIN_STOCK_LEVEL).length > 0
+/**
+ * @param materialName  the mapped material name
+ * @param projectCode   the schedule's own short project code, or '' on a parent row
+ * @param scheduledQty  total scheduled quantity for this row — the scale input
+ * @returns {{ value: number|null, modelled: boolean }}
+ */
+export function minStockLevel(materialName, projectCode, scheduledQty) {
+  const scoped = MIN_STOCK_OVERRIDE[`${materialName}|${projectCode || ''}`]
+  if (Number.isFinite(scoped)) return { value: scoped, modelled: false }
+  const general = MIN_STOCK_OVERRIDE[materialName]
+  if (Number.isFinite(general)) return { value: general, modelled: false }
+  if (!Number.isFinite(scheduledQty) || scheduledQty <= 0) return { value: null, modelled: false }
+  return { value: planningStep(scheduledQty * MIN_STOCK_COVER), modelled: true }
+}
+
+// Every level on the card is modelled while this is empty — the footnote says so once
+// rather than every row repeating it.
+export const hasRealMinStock = Object.keys(MIN_STOCK_OVERRIDE).length > 0
+export const MIN_STOCK_COVER_PCT = Math.round(MIN_STOCK_COVER * 100)
 
 // ---------------------------------------------------------------------------
 // BAR CONSTRUCTION
 
-const norm = (s) => String(s || '').toLowerCase()
-
-// Does a safekeeping row describe this tracker material? Keyword match against both
-// description columns, minus the explicit near-misses.
-const skMatches = (row, keys, not) => {
-  if (!keys || !keys.length) return false
-  const hay = `${norm(row.description)} ${norm(row.detailedDescription)}`
-  if (not && not.some((n) => hay.includes(n))) return false
-  return keys.some((k) => hay.includes(k))
-}
-
-// One bar per (document reference, date). A DR number IS one delivery event, which is
-// exactly what a bar should represent — grouping by it collapses the 20-odd separate
-// lines of a single truckload into the one arrival a reader cares about, instead of
-// stacking twenty unreadable slivers on the same day.
-function actualBars(rows, lane) {
-  const groups = new Map()
-  for (const r of rows) {
-    if (!r.date) continue
-    const day = startOfDay(r.date)
-    const key = `${r.docRef || '(no ref)'}|${day.getTime()}`
-    let g = groups.get(key)
-    if (!g) {
-      g = {
-        kind: 'actual', lane, start: day, end: addDays(day, 1),
-        qty: 0, tbc: false, docRef: r.docRef || '', codes: new Set(), lines: 0,
-        uom: r.uom || '', precision: 'day', firm: true,
-      }
-      groups.set(key, g)
-    }
-    g.qty += Number(r.qty) || 0
-    g.lines += 1
-    if (r.itemCode) g.codes.add(r.itemCode)
-  }
-  return [...groups.values()]
-    .map((g) => ({ ...g, codes: [...g.codes], label: g.docRef || 'Recorded movement' }))
-    .sort((a, b) => a.start - b.start)
-}
 
 // ---------------------------------------------------------------------------
 // ROW MODEL. One row per material x project — the grain the schedule is actually
@@ -322,9 +261,9 @@ function actualBars(rows, lane) {
 // sheet schedules a release out of the warehouse, so the outgoing lane is empty to the
 // right of the now line on every row. The card says so rather than leaving a reader to
 // conclude that nothing is due to leave.
-// Leaf rows: one per material x project. These are what the safekeeping join is done
-// against, because a project is what identifies a batch and what the safekeeping sheets
-// are keyed by. They are returned as the CHILDREN of a material — see buildGanttRows.
+// Leaf rows: one per material x project — the grain the schedule is managed at, since a
+// batch number only means something inside a project. Returned as the CHILDREN of a
+// material; see buildGanttRows.
 function buildLeafRows() {
   const byKey = new Map()
 
@@ -350,9 +289,7 @@ function buildLeafRows() {
         // bar. Deleted in finalise() — it is scratch, and leaving a Map on the row
         // would ride into every memo dependency and tooltip that spreads the row.
         batches: new Map(),
-        codes: [],
         boh: 0,
-        sohLines: 0,
       }
       byKey.set(key, row)
     }
@@ -388,9 +325,10 @@ function buildLeafRows() {
         firm: span ? span.firm : false,
         qty: null, tbc: true, qtyRaw: '', product: null,
         label: d.batch || 'Batch', batch: d.batch, no: d.no,
-        // The source item and its brand ride on the bar so a tooltip can name which
-        // product this batch is, on a row whose title is the shared material name.
-        sourceItem: d.item, brand: d.brand || '',
+        // The source item, its brand and its project ride on the bar. A PARENT row's
+        // bars come from several children, so the bar has to name its own project —
+        // reading it off the row would report the wrong one on every merged parent bar.
+        sourceItem: d.item, brand: d.brand || '', project: d.project,
         uom: d.uom && d.uom !== 'TBC' ? d.uom : '',
         // `warehouse` is the sheet's DELIVERY LOCATION — where the batch is bound, which
         // is not always the warehouse: several batches go straight to the project site.
@@ -420,29 +358,12 @@ function buildLeafRows() {
     if (!row.uom && d.uom && d.uom !== 'TBC') row.uom = d.uom
   }
 
-  // Join each row to its safekeeping stock and movement.
+  // THE SAFEKEEPING JOIN USED TO BE HERE, and its removal on 2026-09-11 is the whole
+  // point of the current shape. Each row was matched into the stock sheets for its
+  // opening position, its already-recorded receipts and pullouts, and its real item
+  // codes. The tracker now reports the delivery workbook and nothing else, so all of
+  // that is gone and every row is finalised straight from its own scheduled batches.
   for (const row of byKey.values()) {
-    const pk = SK_PROJECT_KEY[row.projectCode]
-    if (!pk) { row.planned.sort(byStart); finalise(row); continue }
-    const mine = (r) => norm(r.project).includes(pk) && skMatches(r, row.skKeys, row.skNot)
-
-    const sohRows = soh.filter(mine)
-    row.sheetBoh = sohRows.reduce((a, r) => a + (Number(r.boh) || 0), 0)
-    row.sohLines = sohRows.length
-    row.sheetIn = sohRows.reduce((a, r) => a + (Number(r.in) || 0), 0)
-    row.sheetOut = sohRows.reduce((a, r) => a + (Number(r.out) || 0), 0)
-    row.sheetSoh = sohRows.reduce((a, r) => a + (Number(r.soh) || 0), 0)
-
-    const incRows = incoming.filter(mine)
-    const outRows = outgoing.filter(mine)
-    row.actualIn = actualBars(incRows, 'in')
-    row.actualOut = actualBars(outRows, 'out')
-
-    const codes = new Set()
-    for (const r of [...sohRows, ...incRows, ...outRows]) if (r.itemCode) codes.add(r.itemCode)
-    row.codes = [...codes].sort()
-    row.itemGroup = sohRows.find((r) => r.itemGroup)?.itemGroup || ''
-    if (!row.uom) row.uom = sohRows[0]?.uom || incRows[0]?.uom || ''
     row.planned.sort(byStart)
     finalise(row)
   }
@@ -508,7 +429,6 @@ export function buildGanttRows(keepLeaf) {
     p.undatedInCount = sum((c) => c.undatedInCount)
     p.tbcUndated = sum((c) => c.tbcUndated)
     p.eoh = p.boh + p.totalIn - p.totalOut
-    p.sheetSoh = sum((c) => c.sheetSoh)
     p.recordedIn = sum((c) => c.recordedIn)
     p.recordedOut = sum((c) => c.recordedOut)
     p.bohAdjusted = p.children.some((c) => c.bohAdjusted)
@@ -521,13 +441,16 @@ export function buildGanttRows(keepLeaf) {
     const withMin = p.children.filter((c) => c.minStock != null)
     p.minStock = withMin.length ? withMin.reduce((a, c) => a + c.minStock, 0) : null
     p.minStockPartial = withMin.length > 0 && withMin.length < p.children.length
+    // A material's level is modelled if ANY of the projects under it is. Mixing a real
+    // agreed level with a modelled one gives a total that is partly modelled, and the
+    // weaker claim is the one the card has to make about it.
+    p.minStockModelled = withMin.some((c) => c.minStockModelled)
+    p.scheduledQty = p.children.reduce((a, c) => a + (c.scheduledQty || 0), 0)
 
     // Concatenated, not recomputed: rowAt() and capacityAt() then give a parent exactly
     // the sum of its children at any cursor position, by construction.
     const cat = (f) => p.children.flatMap(f)
     p.planned = cat((c) => c.planned).sort(byStart)
-    p.actualIn = cat((c) => c.actualIn).sort(byStart)
-    p.actualOut = cat((c) => c.actualOut).sort(byStart)
     p.inBars = cat((c) => c.inBars).sort(byStart)
     p.outBars = cat((c) => c.outBars).sort(byStart)
     p.noDateBars = cat((c) => c.noDateBars)
@@ -562,12 +485,17 @@ const byStart = (a, b) => (a.start ? a.start.getTime() : Infinity) - (b.start ? 
 
 function finalise(row) {
   delete row.batches
-  row.actualIn = row.actualIn || []
-  row.actualOut = row.actualOut || []
-  // Lane bar lists: recorded movement and schedule share the incoming lane.
-  row.inBars = [...row.actualIn, ...row.planned.filter((p) => p.start)].sort(byStart)
+  // The in lane is the dated schedule. It used to be the recorded receipts PLUS the
+  // schedule sharing one track; with the stock sheets gone there is nothing recorded to
+  // merge in, so a bar is always a scheduled delivery.
+  row.inBars = row.planned.filter((p) => p.start).sort(byStart)
   row.noDateBars = row.planned.filter((p) => !p.start)
-  row.outBars = [...row.actualOut]
+  // Empty, and structurally so: no source in this system schedules an outbound, and the
+  // recorded pullouts that used to fill this lane came from safekeeping. Kept as a real
+  // (empty) lane rather than removed, because the card still offers an Out view and a
+  // lane that is present-and-empty says "nothing is planned out" where a missing lane
+  // would say nothing at all.
+  row.outBars = []
 
   const sum = (bars) => bars.reduce((a, b) => a + (b.qty || 0), 0)
   const tbc = (bars) => bars.filter((b) => b.tbc).length
@@ -596,24 +524,35 @@ function finalise(row) {
   // neither a date nor a quantity must not be reported twice.
   row.tbcUndated = tbc(row.noDateBars)
 
-  // BOH is the position before the FIRST bar on this timeline, wound back off the
-  // sheet's closing SOH — see the header note on why the sheet's own boh column
-  // double-counts. Only RECORDED movement is unwound; a scheduled delivery has not
-  // happened yet and was never in the closing position to begin with.
-  row.recordedIn = sum(row.actualIn)
-  row.recordedOut = sum(row.actualOut)
-  const bohRaw = (row.sheetSoh || 0) - row.recordedIn + row.recordedOut
-  row.bohRaw = bohRaw
-  row.bohAdjusted = bohRaw < 0
-  row.boh = Math.max(0, bohRaw)
+  // BOH IS ZERO, AND THAT IS THE HONEST ANSWER rather than a missing feature.
+  //
+  // The delivery workbook records what is scheduled to ARRIVE. It carries no opening
+  // position, no stock on hand and no receipts — those came from the safekeeping sheets,
+  // which this card no longer reads. So the position before the first bar on the
+  // timeline is not something this source knows, and the only truthful figure is zero
+  // with a tooltip that says why. Inventing an opening balance to make the column look
+  // populated is the one thing that must not happen.
+  //
+  // EOH therefore reads as "how much will have arrived by the cursor" — cumulative
+  // scheduled intake — which is a real and useful figure for a delivery tracker even
+  // though it is not a stock position.
+  row.recordedIn = 0
+  row.recordedOut = 0
+  row.bohAdjusted = false
+  row.boh = 0
   row.eoh = row.boh + row.totalIn - row.totalOut
 
   const all = [...row.inBars, ...row.outBars]
   row.firstDate = all.length ? Math.min(...all.map((b) => b.start.getTime())) : null
   row.lastDate = all.length ? Math.max(...all.map((b) => b.end.getTime())) : null
   row.plannedCount = row.planned.length
-  row.actualCount = row.actualIn.length + row.actualOut.length
-  row.minStock = minStockLevel(row.materialName, row.projectCode)
+  // The model's scale input is everything this project has scheduled for this material,
+  // dated or not — an undated batch is still tonnage the warehouse will have to hold.
+  const scheduled = row.totalIn + (row.undatedIn || 0)
+  const min = minStockLevel(row.materialName, row.projectCode, scheduled)
+  row.minStock = min.value
+  row.minStockModelled = min.modelled
+  row.scheduledQty = scheduled
   return row
 }
 
@@ -690,6 +629,70 @@ export function capacityAt(rows, cursor) {
     heldM2: heldPositions * M2_PER_POSITION,
     perRow: perRow.sort((a, b) => Math.abs(b.pallets) - Math.abs(a.pallets)),
   }
+}
+
+// ---------------------------------------------------------------------------
+// MONTHLY BREAKDOWN — what is due to land in a given month, split by material.
+//
+// WHAT "VALUE" MEANS HERE, because it is not pesos. The delivery workbook carries a
+// quantity and a unit of measure and NO price — there is no price column on any sheet
+// of it, and the tracker no longer reads the stock workbook that had one. So this
+// counts QUANTITY, and the card says "quantity" rather than "value" everywhere it is
+// labelled. Pricing it would mean joining back to the item master by keyword and
+// multiplying by a unit cost that was never quoted for these deliveries; the figure
+// would look authoritative and be invented.
+//
+// A delivery is placed in the month its target span STARTS. For a firm date that is the
+// month of the date. For an estimate the span is the window the source commits to
+// ("August 2026" covers the month; "Mid September" its middle third), and all of those
+// start inside the month they name, so the placement is the same either way.
+//
+// Deliveries with no target at all cannot be placed in any month and are counted apart,
+// exactly as the timeline holds them out of the In column.
+export function deliveryMonths() {
+  const months = new Map()
+  let undated = 0
+  let undatedQty = 0
+
+  for (const d of deliveryRows) {
+    const q = parseQty(d.qty)
+    const span = targetSpan(d)
+    if (!span) {
+      undated += 1
+      if (q.value != null) undatedQty += q.value
+      continue
+    }
+    const key = `${span.start.getFullYear()}-${String(span.start.getMonth() + 1).padStart(2, '0')}`
+    let m = months.get(key)
+    if (!m) {
+      m = {
+        key,
+        date: startOfMonth(span.start),
+        label: span.start.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+        total: 0, lines: 0, tbc: 0,
+        byMaterial: new Map(),
+        byProject: new Map(),
+      }
+      months.set(key, m)
+    }
+    m.lines += 1
+    if (q.value == null) { m.tbc += 1; continue }
+    m.total += q.value
+    m.byMaterial.set(d.materialName, (m.byMaterial.get(d.materialName) || 0) + q.value)
+    m.byProject.set(d.project, (m.byProject.get(d.project) || 0) + q.value)
+  }
+
+  const list = [...months.values()].sort((a, b) => a.date - b.date)
+  for (const m of list) {
+    const slices = (map) => [...map.entries()]
+      .map(([name, qty]) => ({ name, qty, value: qty }))
+      .sort((a, b) => b.qty - a.qty)
+    m.materials = slices(m.byMaterial)
+    m.projects = slices(m.byProject)
+    delete m.byMaterial
+    delete m.byProject
+  }
+  return { months: list, undated, undatedQty }
 }
 
 // ---------------------------------------------------------------------------

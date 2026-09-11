@@ -7,6 +7,7 @@ import { CardListPanel, DescCell } from '../../components/MaterialList'
 import Select from '../../components/Select'
 import DataSheet from '../../components/DataSheet'
 import DeliveryTracker from '../../components/DeliveryTracker'
+import DeliveryMonthPie from '../../components/DeliveryMonthPie'
 import { DistributionDonut } from '../../components/charts'
 import { num } from '../../lib/format'
 import { seriesFor } from '../../lib/colors'
@@ -232,6 +233,9 @@ export default function SafekeepingTab({ pool, qtyUnit = 'units' }) {
               movement in and out of the yard, sourced from the real Warehouse Schedule
               sheet. It used to be its own Activity sub-view. */}
           <DeliveryTracker />
+          {/* The monthly breakdown reads the same warehouse-bound schedule the tracker
+              above does, so the two can never disagree about what is due when. */}
+          <DeliveryMonthPie />
         </div>
       )}
 

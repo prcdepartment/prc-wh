@@ -9,14 +9,24 @@
 
    .gtt-scroll scrolls in BOTH axes and holds a single grid:
 
-       | Material  BOH  Min  In  |        timeline         |  EOH |
-       |                     Out  |                         |      |
+       | Material  Min  BOH  In  |        timeline         |  EOH |
+       |                     Out |                         |      |
          ^ sticky left                                        ^ sticky right
        ^ header row is sticky top; the two corners are sticky in both axes
 
    In and Out are ONE column of two stacked sub-rows, each the height of one lane, so
-   each figure sits on the same baseline as the lane it totals. Min is the minimum stock
-   level and is fed by MIN_STOCK_LEVEL in deliveryGantt.js, which no source populates.
+   each figure sits on the same baseline as the lane it totals. The DIRECTIONS ARE NAMED
+   ONCE, in the header, and coloured there — the rows carry no per-direction tag.
+
+   Min comes before BOH: the floor is read first and the position against it. Min is
+   modelled from the schedule (minStockLevel in deliveryGantt.js) and is drawn with a
+   dotted underline to say so; BOH is 0 on every row because the delivery workbook
+   records no opening stock.
+
+   ALL FOUR NUMERIC COLUMNS SHARE ONE 7px RIGHT INSET. That is easy to break: `.gc` sets
+   the padding and is declared late in this file, so a single-class rule on a specific
+   column loses to it — which is exactly how the In / Out figures ended up inset twice
+   and sitting 7px left of everything else.
 
    This replaced an earlier three-pane flex layout (frozen left, scrolling middle,
    frozen right). Three panes cannot share a VERTICAL scrollbar without a JS listener
@@ -93,6 +103,9 @@
   padding: 9px 16px 10px;
   border-bottom: 1px solid var(--border);
 }
+/* Holds the control bar's layout now that the legend is gone: .gtt-bar is a
+   space-between row, so without a first child the controls would jump to the left. */
+.gtt-spacer { flex: 1 1 auto; }
 .gtt-legend { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
 .gl {
   display: inline-flex; align-items: center; gap: 6px;
@@ -194,7 +207,15 @@
    without it this column would shrink to its content and the two sub-rows would stop
    lining up with the lanes. Height comes from the sub-rows, so In-or-Out mode renders
    one 22px sub-row in a 22px row with no special case. */
-.gc-flow {
+/* TWO CLASSES, and that is the fix for the alignment this column had from the day it
+   was built. `.gc` sets `padding: 0 7px` and is declared LATER in this file, so a
+   single-class `.gc-flow { padding: 0 }` lost to it — the container kept its 7px and
+   `.gf` added 7px of its own inside that, insetting every In / Out figure by 14px while
+   Min, BOH and EOH were inset by 7. The figures sat 7px left of every other column and
+   of their own header. Measured before: In/Out text right edge 343 against 350 for the
+   header and for every other numeric column. The padding belongs to `.gf`, which is
+   what has to line up with the lane beside it, so the container must have none. */
+.gc.gc-flow {
   align-self: stretch;
   display: flex; flex-direction: column;
   padding: 0;
@@ -202,6 +223,9 @@
 .gf {
   flex: 0 0 var(--gtt-lane); height: var(--gtt-lane);
   display: flex; align-items: center; justify-content: flex-end; gap: 3px;
+  /* Same 7px right padding as every other numeric cell, so the In / Out figures, the
+     Min and BOH figures above them and the header words all sit on one right margin.
+     They did not before: the tag was pushing the figure off that line. */
   padding: 0 7px;
   font-family: var(--gtt-figs); font-size: 12.5px; font-weight: 600;
   letter-spacing: 0.01em; font-variant-numeric: tabular-nums;
@@ -213,24 +237,34 @@
 }
 .gf-in { color: var(--gtt-ink-in); }
 .gf-out { color: var(--gtt-ink-out); }
-/* Direction tag on each sub-row. The column has no per-direction header — the header
-   cell above it is a single "In / Out" — so each figure names its own direction. */
-.gf-tag {
-  flex: 0 0 auto; order: -1; margin-right: auto;
-  font-family: var(--font); font-style: normal;
-  font-size: 7.5px; font-weight: 700; letter-spacing: 0.05em;
-  text-transform: uppercase; opacity: 0.6;
-}
+/* THE HEADER CARRIES THE DIRECTIONS, the rows no longer do. Each row used to print a
+   small "IN" / "OUT" tag beside its figure, which spent the column's width restating on
+   every line what the colour of the figure already says. The header's two words are
+   coloured with the same inks instead — so "In" is red and "Out" is orange there, the
+   figures below match, and the bars match both. One statement, three places agreeing.
+
+   Right-aligned to sit directly over the figures, which are right-aligned too. */
+.gc-flow-h { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.gfh { font-style: normal; font-weight: 800; letter-spacing: 0.06em; }
+.gfh-in { color: var(--gtt-ink-in); }
+.gfh-out { color: var(--gtt-ink-out); }
+.gfh-sep { font-style: normal; opacity: 0.45; font-weight: 600; }
 .is-child .gf-in { color: color-mix(in srgb, var(--gtt-ink-in) 72%, var(--text-muted)); }
 .is-child .gf-out { color: color-mix(in srgb, var(--gtt-ink-out) 72%, var(--text-muted)); }
 .is-child .gf { font-weight: 600; }
 
 /* ---- Minimum stock level ------------------------------------------------
-   Fed by MIN_STOCK_LEVEL in deliveryGantt.js, which is EMPTY: no source workbook
-   records a minimum, so every cell is an em dash today. Styled muted rather than as a
-   figure, because a dash rendered at figure weight reads as a missing value the card
-   failed to load rather than one nobody has set. */
-.gc-min { color: var(--text-muted); }
+   MODELLED from the schedule (see minStockLevel in deliveryGantt.js). A modelled figure
+   is drawn in muted ink with a dotted underline — present and readable, but visibly not
+   the same kind of number as the measured ones beside it. A figure somebody has actually
+   agreed (MIN_STOCK_OVERRIDE) renders in full text colour with no underline, so the two
+   can never be confused once real levels arrive. */
+.gc-min { color: var(--text); }
+.gc-min.is-modelled {
+  color: var(--text-muted);
+  text-decoration: underline dotted color-mix(in srgb, var(--text) 30%, transparent);
+  text-underline-offset: 3px;
+}
 .gc-min.is-unset { color: var(--text-muted); font-weight: 500; }
 .gc { padding: 0 7px; min-width: 0; font-size: 11px; color: var(--text); }
 .gtt-head .gc { font-size: inherit; font-weight: inherit; letter-spacing: inherit; color: inherit; }
@@ -591,7 +625,14 @@
    chart, which is the wrong emphasis for the one number that is explicitly provisional. */
 .gcw-m2 { font-family: var(--gtt-figs); font-size: 19px; font-weight: 600; line-height: 1.02; color: var(--text); font-variant-numeric: tabular-nums; }
 .gcw-m2 em { font-family: var(--font); font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--text-muted); margin-left: 3px; }
-.gcw-sub { font-size: 9px; font-weight: 600; color: var(--text-muted); }
+.gcw-sub { font-size: 9.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+.gcw-sub b { font-family: var(--gtt-figs); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gcw-sub b.up { color: var(--gtt-ink-in); }
+.gcw-sub b.dn { color: var(--green-dark, var(--green)); }
+/* The qualifier drops on a phone: the window is 140px there and the line is nowrap,
+   so "% of Safekeeping" pushed the text past its own box. The percentage still reads,
+   and the tooltip carries the full sentence. */
+.gcw-of { font-style: normal; }
 .gcw-net { display: flex; align-items: center; gap: 2px; font-family: var(--gtt-figs); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gcw-net.up { color: var(--gtt-ink-in); }
 .gcw-net.dn { color: var(--green); }
@@ -632,6 +673,7 @@
   .gtt-legend { gap: 7px 10px; }
   .gl { font-size: 9.5px; }
   .gtt-capwin { width: 140px; padding: 5px 7px 6px; }
+  .gcw-of { display: none; }
   .gcw-m2 { font-size: 15px; }
   .gtt-note { padding: 9px 12px 13px; }
 }
@@ -767,4 +809,56 @@
    leaves a 15px sliver of chart, which is neither one thing nor the other. */
 @media (max-width: 620px) {
   .gtt-panel { width: 100%; border-left: none; }
+}
+
+/* ==========================================================================
+   DELIVERIES BY MONTH — the ring under the tracker.
+
+   Lives in this stylesheet rather than index.css because it is part of the delivery
+   tracker and ships in the same lazy chunk, the same way the panel above does.
+   ========================================================================== */
+.dmp-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+/* The month block takes the middle and CENTRES, so stepping from "July 2026" to
+   "September 2026" does not shuffle the arrows left and right under the pointer. */
+.dmp-month { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.dmp-month strong {
+  font-family: var(--gtt-figs); font-size: 19px; font-weight: 600; line-height: 1.1;
+  letter-spacing: 0.01em; color: var(--text); white-space: nowrap;
+}
+.dmp-month span { font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-align: center; }
+.dmp-tbc { font-style: normal; color: var(--text-muted); }
+
+.dmp-nav {
+  flex: 0 0 auto; width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text-muted);
+}
+.dmp-nav:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+/* Disabled rather than hidden at the ends of the range: a control that vanishes makes
+   the row jump, and its absence does not explain that you have reached the first month. */
+.dmp-nav:disabled { opacity: 0.38; cursor: default; }
+.rot180 { transform: rotate(180deg); }
+
+.dmp-chart { padding: 6px 16px 4px; }
+.dmp-empty { padding: 26px 16px 30px; }
+
+.dmp-note {
+  display: flex; align-items: flex-start; gap: 7px; margin: 0;
+  padding: 10px 16px 14px;
+  font-size: 10.5px; line-height: 1.5; color: var(--text-muted);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.dmp-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }
+.dmp-note strong { color: var(--text); font-weight: 700; }
+
+@media (max-width: 620px) {
+  .dmp-bar { padding: 9px 12px 8px; }
+  .dmp-month strong { font-size: 16px; }
+  .dmp-chart { padding: 4px 8px; }
+  .dmp-note { padding: 9px 12px 13px; }
 }

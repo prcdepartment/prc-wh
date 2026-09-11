@@ -3297,3 +3297,159 @@ measurement.
 `npm run build` passes. `dist/` carries no item code, price, bin location, document
 reference, designation, tower or project name — the only code-shaped strings are the
 three form placeholders in the Add Material and Add Safekeeping modals, as before.
+
+### 2026-09-11 — Session: the tracker reads the delivery workbook alone; monthly pie, modelled minimums
+
+Six requests. The fourth is the one that changed the card's nature.
+
+**4. ONE SOURCE. The safekeeping join is gone.** The tracker was built from three sheets:
+the delivery schedule for what is planned, plus safekeeping's `soh` for an opening
+position and its `incoming`/`outgoing` for recorded movement. It now reads the delivery
+workbook and nothing else, and it is also narrowed to the rows bound for the warehouse.
+
+Three consequences follow, and none of them is hidden — each is stated on the card:
+
+| | Before | Now |
+|---|---|---|
+| BOH | wound back from safekeeping's closing stock | **0 on every row** — the workbook records no opening stock |
+| Bars | recorded receipts AND schedule, sharing a track | **every bar is scheduled** — nothing recorded remains to draw |
+| Out lane | recorded pullouts | **empty** — and structurally so |
+| Item codes | resolved from the safekeeping join | gone from the panel |
+
+BOH reading 0 is the honest answer rather than a gap: a schedule of what will arrive
+does not know what is on the shelf, and inventing an opening balance to make the column
+look populated is exactly the fabrication this file has removed several times. EOH still
+means something — cumulative scheduled intake to the cursor.
+
+**The warehouse filter, and it is large.** `WAREHOUSE_BOUND` keeps only rows whose
+DELIVERY LOCATION reads "Taytay Central Warehouse" or plain "Central Warehouse" (the
+source writes it both ways, and that column is typed by hand, so it is matched
+case-insensitively on either form). **268 of 355 line items go**: 169 ship straight to a
+project site and never touch Taytay, and 99 record no destination at all — a blank is not
+the warehouse. What survives is 87 lines, 7 materials, 5 projects, and **six materials
+disappear entirely** (AGW Jia Hua, Penguin Sealant, SPC Flooring, Wires & Cables, IMC
+Pipe, Genset) because every one of their deliveries is site-bound. `deliveryExcluded`
+carries the counts and the card's footnote prints them — a filter that drops three
+quarters of the source must not be silent.
+
+Checked before trusting it: no batch has a mixed destination (171 batches, 0 mixed), so
+the filter never splits a delivery in half.
+
+The filter is applied in `rebuildDeliveryRows`, so the Gantt, the Table view and the KPI
+row all narrow together and cannot disagree about what the tracker covers. `MATERIAL_MAP`
+lost its `sk`/`skNot` keyword lists along with the join; `match` stays, because that
+resolves an item code from the item MASTER for the Table view, which is a catalogue
+lookup rather than a second source of schedule data.
+
+**1. The In / Out column is aligned, and the alignment bug was real.** `.gc` sets
+`padding: 0 7px` and is declared LATE in the stylesheet, so the single-class
+`.gc-flow { padding: 0 }` lost to it — the container kept 7px and `.gf` added 7px inside
+that, insetting every In / Out figure by 14px while Min, BOH and EOH were inset by 7.
+Measured before the fix: the In / Out text right edge at 343 against 350 for its own
+header and for every other numeric column. `.gc.gc-flow` at two classes fixes it.
+Measured after: **all three columns share one 7px right inset and every header sits
+exactly over its figures, 0px offset.**
+
+And the per-row "IN" / "OUT" tags are gone, as suggested. The header's two words are
+COLOURED instead — red for in, orange for out, the same inks the figures and the bars
+already use — so direction is stated once and three things agree, where before every row
+spent column width repeating a word the colour of the figure already said.
+
+**2. The legend is gone.** Six swatches explaining four bar states and two lines took the
+left half of the control bar to restate what the chart shows: the header is now
+colour-coded, a faded bar plainly reads as not-yet, and both lines are labelled where
+they stand. The full account is still in every bar's tooltip and its panel.
+
+**3. The floor-space read-out is two lines, and its strip shrank to fit.** It was six —
+a heading, the figure, a pallet-position count, a net line, a progress bar and a
+percentage caption — for a read-out that is explicitly provisional and travels over the
+chart. Now the figure and, beneath it, the net and the percentage; the position count and
+the arithmetic live in its tooltip, and the heading was labelling a number whose unit is
+printed beside it.
+
+It went 99px to **52px** (46px on a phone), so `FOOT_H` — the dedicated strip reserved at
+the end of the content so the window covers no row — came down **104 to 60**. That is the
+point of the strip: an oversized one is chart height spent on nothing, and the 44px went
+back to the rows. Verified at both widths: the window sits inside its strip with clearance
+and the chart still fits its scrollport exactly (430/430 at 375px, and it fits at desktop).
+One narrow-width bug found and fixed on the way — the nowrap sub-line overflowed the
+140px mobile window, so " of Safekeeping" is dropped under 480px.
+
+**5. Min and BOH swapped, and the minimum is now MODELLED.** Min comes first: the floor is
+read, then the position against it.
+
+Previous sessions refused to invent a minimum because no source records one — searched
+again this session and that is still true. Procurement has now asked for a modelled figure
+"based on the scale and scope of the projects", so that is what this is, and it says so
+everywhere it appears:
+
+    minimum = roundToPlanningStep( total scheduled for that row x 15% )
+
+Total scheduled is the only measure of project scale the source contains, and 15% is
+roughly what one delivery represents on a typical row here. The result is rounded to a
+planning step — 5s below 100, 10s below 500, 50s below 2,000, 100s above — because
+"1,250" reads as a figure somebody chose and "1,247" reads as one a spreadsheet produced.
+Samples: 150 of 1,020 · 260 of 1,753 · 1,600 of 10,654 · 6,200 of 41,320.
+
+A modelled figure is drawn in muted ink with a **dotted underline**, so it is visibly not
+the same kind of number as the measured ones beside it; a level from `MIN_STOCK_OVERRIDE`
+(empty today) renders in full colour with no underline and stops being flagged. The
+inventory table's own `minLevel` is deliberately still NOT used — that one is synthesized
+by the stock importer as `1 + Math.floor(rnd() * 20)` and bears no relation to the
+material, which would be worse than this, not better.
+
+**6. A monthly pie under the tracker.** New `DeliveryMonthPie`, reading the same
+warehouse-bound schedule the chart above does so the two can never disagree. Arrows step
+month by month and it opens on the current month rather than the first in the file (the
+schedule runs into 2027, and opening two years in the past would look broken). A toggle
+cuts the same month by Material or by Project.
+
+**IT COUNTS QUANTITY, NOT PESOS, and every label says so.** The delivery workbook records
+a quantity and a unit of measure and carries no price on any sheet, and the tracker no
+longer reads the stock workbook that had one. A peso figure would mean multiplying by a
+unit cost nobody quoted for these deliveries — it would look authoritative and be
+invented. The note under the ring states this, and that the ring mixes units of measure
+across materials, which is why the share is the useful part rather than the total.
+
+A delivery is placed in the month its target span starts, so an estimate like "August
+2026" counts in August. Nine deliveries carry no target at all and appear in no month;
+the note says how many. A month whose every line is TBC shows an explanation rather than
+an empty ring, because an empty ring would read as "nothing due" — the opposite.
+
+**Verified.** A Node probe against the private masters: 87 of 355 rows kept and **every
+kept row really is warehouse-bound**; BOH 0, out 0 and no non-scheduled bar on any row;
+bars still sum to their In column; EOH = BOH + In − Out; parent = sum of children on the
+minimum; every modelled minimum positive and below its own scheduled total; and the
+monthly breakdown reconciles exactly — **50,585 in months + 13,438 undated = 64,023, the
+source total to the unit**, with each month's slices summing to its own stated figure on
+both the material and the project cut.
+
+In the browser at 1440x900 and 375x812, light and dark: zero label collisions, zero
+clipped labels, zero bars escaping a lane, zero misaligned rows, zero page-level
+horizontal scroll, bar numbers summing to their column on every lane, BOH showing "0"
+throughout and 13 of 17 rows carrying a modelled minimum (the other four have nothing
+scheduled, so there is no scale to model from). The panel opens with the destination,
+project, tower, status, UOM, remarks and line items — and shows both spellings of the
+destination, confirming the filter matches either. Month navigation exercised: September
+2026 → August 2026, whose four slices read 90% / 5% / 3% / 2% and sum to its stated
+34,032 units.
+
+**Contrast: zero failures in both themes** — 92 pairs light (min 5.04) and 100 dark
+(min 4.86), including the new coloured header words, the dotted-underline minimum, the
+two-line read-out and every element of the pie card.
+
+`npm run build` passes. `dist/` carries no item code, price, designation, tower, document
+reference or project name; "Central Warehouse" appears 15 times and all 15 are
+pre-existing uses of the app's own facility name — the count is identical before and
+after this change.
+
+**Open questions, unchanged or new:**
+1. **Real minimum stock levels** — the model is a placeholder. Put agreed figures in
+   `MIN_STOCK_OVERRIDE` and they take precedence immediately.
+2. **The 99 rows with no delivery location.** They are excluded because a blank is not
+   the warehouse, but if any of them are in fact warehouse-bound they belong on this
+   card — worth a pass through that column.
+3. **Prices.** If the pie should show peso value rather than quantity, the workbook needs
+   a price column, or a price list keyed to these materials.
+4. Lancaster and OLP still render as short codes; both are site-bound, so neither now
+   appears on the tracker at all.

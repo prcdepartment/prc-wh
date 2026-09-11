@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   buildGanttRows, visibleRows, timelineRange, timelineTicks, tickGroups, TICK_LABEL,
   TIMELINE_UNITS, rowAt, capacityAt, cursorEdge, startOfDay, M2_PER_POSITION,
-  ganttToday, snapshotLag, hasMinStockData,
+  ganttToday, hasRealMinStock, MIN_STOCK_COVER_PCT,
 } from '../data/deliveryGantt'
-import { num, fmtDate, fmtTargetText, fmtTower, TODAY } from '../lib/format'
+import { deliveryExcluded } from '../data/deliveryTracker'
+import { num, fmtDate, fmtTargetText, fmtTower } from '../lib/format'
 import { seriesFor } from '../lib/colors'
 import { useTheme } from '../context/ThemeContext'
 import { whAreaM2, WH_AREAS } from '../data/warehouseMap'
@@ -59,19 +60,19 @@ const LABEL_PAD = 7
 const labelWidth = (txt) => txt.length * CHAR_W + LABEL_PAD
 
 const CAPWIN_W = 168
-// Height reserved for the capacity window at the end of the content, so that a window
-// pinned to the bottom of the scrollport covers no row once the chart fits the display.
+// Height of the DEDICATED STRIP the travelling read-out lives in, at the end of the
+// content, so the window covers no row once the chart fits the display.
 //
-// 104 is not a round number, it is an exact fit, and it is pinned at BOTH ends:
-//   * the chart must still fit the scrollport, which caps out at 650px of usable height
-//     — and rows + header + FOOT_H comes to exactly 650 at 104. Raising it to 112 (tried
-//     on 2026-09-11) pushed the content to 658 and the chart started scrolling, losing
-//     the "fits and maximises within the display" property this card was built for;
-//   * the window must fit inside it — 99px tall plus its 5px bottom offset = 104.
+// 60 as of 2026-09-11, down from 104, because the read-out was cut from six lines to
+// two and is now 52px tall (46px under the mobile rule) — 52 + its 5px bottom offset
+// = 57, and 60 leaves a little room. The 44px that came back went to the rows, which
+// is the point: the strip is reserved space, so an oversized one is chart height spent
+// on nothing.
 //
-// So the window's `bottom` in gantt.css and its rendered height are both part of this
-// arithmetic. Change the read-out's type and all three have to be re-measured together.
-const FOOT_H = 104
+// Measured at BOTH widths, because the narrow variant has bitten before. Change the
+// read-out and re-measure all three numbers together: its rendered height, its bottom
+// offset in gantt.css, and this.
+const FOOT_H = 60
 
 const SAFEKEEPING_M2 = whAreaM2(WH_AREAS.find((a) => a.id === 'safekeeping'))
 
@@ -355,12 +356,16 @@ function DetailPanel({ open, onClose }) {
                   <em className="gp-est"> estimate — the bar spans the window the source commits to</em>
                 )}
               </dd>
-              {m.kind === 'planned' && m.sourceItem && (<><dt>Item</dt><dd>{m.sourceItem}</dd></>)}
-              {m.kind === 'planned' && m.location && (<><dt>Tower</dt><dd>{fmtTower(m.location)}</dd></>)}
-              {m.kind === 'planned' && m.warehouse && (<><dt>Deliver to</dt><dd>{m.warehouse}</dd></>)}
-              {m.kind === 'planned' && m.dpPayment && (<><dt>DP</dt><dd>{m.dpPayment}</dd></>)}
-              {m.kind !== 'planned' && m.docRef && (<><dt>Reference</dt><dd className="gp-mono">{m.docRef}</dd></>)}
-              {m.kind !== 'planned' && m.codes?.length > 0 && (<><dt>Item codes</dt><dd className="gp-mono">{m.codes.join(', ')}</dd></>)}
+              {m.sourceItem && (<><dt>Item</dt><dd>{m.sourceItem}{m.brand ? ` · ${m.brand}` : ''}</dd></>)}
+              <dt>Project</dt><dd>{row.isParent ? (m.project || row.project || '—') : row.project}</dd>
+              {m.location && (<><dt>Tower</dt><dd>{fmtTower(m.location)}</dd></>)}
+              {/* The destination is why this delivery is on the card at all — the tracker
+                  shows warehouse-bound rows only — so it is always listed, never folded
+                  away when it happens to be the common case. */}
+              <dt>Deliver to</dt><dd>{m.warehouse || '—'}</dd>
+              {m.status && (<><dt>Status</dt><dd>{m.status}</dd></>)}
+              {m.dpPayment && (<><dt>DP</dt><dd>{m.dpPayment}</dd></>)}
+              {m.uom && (<><dt>UOM</dt><dd>{m.uom}</dd></>)}
               {m.opsRemarks && (<><dt>Ops</dt><dd className="gp-rem">{m.opsRemarks}</dd></>)}
               {m.prcRemarks && (<><dt>PRC</dt><dd className="gp-rem">{m.prcRemarks}</dd></>)}
             </dl>
@@ -434,11 +439,6 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   // index, so a re-layout (a zoom change, a filter, opening a material) cannot leave the
   // panel pointing at a different delivery than the one that was clicked.
   const [openBar, setOpenBar] = useState(null)
-
-  // How stale the recorded side is. The safekeeping sheets are a snapshot, so the
-  // stretch between that date and today carries no receipts or pullouts — and an empty
-  // stretch to the LEFT of the line must not read as "nothing moved".
-  const lag = snapshotLag(TODAY, today)
 
   // Escape closes the panel. Bound while it is open only, so this card does not swallow
   // Escape from anything else on the dashboard the rest of the time.
@@ -592,14 +592,12 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
     <div className={`gtt-root gtt-mode-${mode}`}>
       {/* ------------------------------------------------------------- controls */}
       <div className="gtt-bar">
-        <div className="gtt-legend" hidden={rows.length === 0}>
-          <span className="gl"><i className="gl-sw gl-solid" style={{ '--c': IN_C }} />In · to date</span>
-          <span className="gl"><i className="gl-sw gl-wash" style={{ '--c': IN_C }} />In · scheduled</span>
-          <span className="gl"><i className="gl-sw gl-solid" style={{ '--c': OUT_C }} />Out · to date</span>
-          <span className="gl"><i className="gl-sw gl-wash" style={{ '--c': OUT_C }} />Out · scheduled</span>
-          <span className="gl gl-line"><i className="gl-now" />Today</span>
-          <span className="gl gl-line"><i className="gl-cur" />Position line</span>
-        </div>
+        {/* The legend that used to sit here is gone. Six swatches explaining four bar
+            states and two lines took the whole left half of the control bar to restate
+            what the chart already shows: the In / Out header is colour-coded, a faded
+            bar plainly reads as not-yet, and both lines are labelled where they stand.
+            Every bar still carries the full account in its tooltip and its panel. */}
+        <div className="gtt-spacer" aria-hidden="true" />
         <div className="gtt-ctl">
           {anyExpandable && (
             <button type="button" className="btn-ghost btn-xs" onClick={toggleAll}>
@@ -644,14 +642,22 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
             {/* header ------------------------------------------------------- */}
             <div className="gtt-cell gtt-head gtt-left gtt-corner" ref={leftHeadRef}>
               <span className="gc gc-desc">Material</span>
-              <span className="gc gc-n">BOH</span>
-              <span className="gc gc-n" title={hasMinStockData
+              {/* Min sits BEFORE BOH: the floor comes first and the position is read
+                  against it, which is the order the question is actually asked in. */}
+              <span className="gc gc-n" title={hasRealMinStock
                 ? 'Minimum stock level — the buffer this material should not fall below.'
-                : 'Minimum stock level — the buffer this material should not fall below. Nothing in any source workbook records one, so every row reads as a dash. Fill in MIN_STOCK_LEVEL in deliveryGantt.js once the warehouse team supplies the figures.'}>Min</span>
-              {/* One header for the whole In / Out column. The two directions are named
-                  on their own sub-rows instead, which is what keeps each label beside
-                  the lane it belongs to. */}
-              <span className="gc gc-n">{mode === 'both' ? 'In / Out' : mode === 'in' ? 'In' : 'Out'}</span>
+                : `Minimum stock level — the buffer this material should not fall below. MODELLED, not recorded: no source carries one, so each is ${MIN_STOCK_COVER_PCT}% of what that project has scheduled for the material, rounded to a planning step. Replace with agreed figures in MIN_STOCK_OVERRIDE in deliveryGantt.js.`}>Min</span>
+              <span className="gc gc-n" title="Beginning on hand. The delivery workbook records no opening stock, so this reads 0 on every row — see the note under the chart.">BOH</span>
+              {/* ONE header for the In / Out column, and the two words are COLOURED —
+                  red for in, orange for out, matching the bars and the figures below.
+                  That is what let the per-row "IN" / "OUT" tags go: the colour of a
+                  figure already says which direction it is, so repeating the word on
+                  every row was spending the column's width to say it a second time. */}
+              <span className="gc gc-n gc-flow-h">
+                {mode !== 'out' && <em className="gfh gfh-in">In</em>}
+                {mode === 'both' && <i className="gfh-sep">/</i>}
+                {mode !== 'in' && <em className="gfh gfh-out">Out</em>}
+              </span>
             </div>
             <div className="gtt-cell gtt-head gtt-thead" ref={tlHeadRef} style={{ paddingBottom: CURSOR_RAIL }}>
               <div className="gtt-groups">
@@ -705,17 +711,20 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                       </span>
                       {r.isParent && r.expandable && <em className="gd-count">{r.projectCount}</em>}
                     </span>
-                    <span className="gc gc-n gc-boh" title={r.bohAdjusted
-                      ? `Wound back below zero from the sheet's closing stock — the source's own totals do not reconcile with its dated movements here. Shown as 0.`
-                      : `Stock before the first movement on this timeline. Wound back from the sheet's closing ${num(r.sheetSoh || 0)} by the ${num(r.recordedIn || 0)} received and ${num(r.recordedOut || 0)} issued since.`}>
-                      {num(r.boh)}{r.bohAdjusted && <em className="gc-flag">!</em>}
-                    </span>
-                    <span className={`gc gc-n gc-min ${r.minStock == null ? 'is-unset' : ''}`} title={r.minStock == null
-                      ? `No minimum stock level is recorded for ${r.materialName}. Nothing in the delivery workbook or the stock workbook carries one, so this is genuinely unset rather than zero — a zero here would read as "may run empty".`
-                      : `Minimum stock level ${num(r.minStock)} ${r.uom || ''}`.trim()
-                        + (r.minStockPartial ? ' — summed over only the projects that have one set, so it under-states the material.' : '')}>
+                    <span className={`gc gc-n gc-min ${r.minStock == null ? 'is-unset' : ''} ${r.minStockModelled ? 'is-modelled' : ''}`} title={r.minStock == null
+                      ? `No minimum stock level for ${r.materialName} — nothing is scheduled for it on this row, so there is no scale to model one from.`
+                      : [
+                        `Minimum stock level ${num(r.minStock)} ${r.uom || ''}`.trim(),
+                        r.minStockModelled
+                          ? `MODELLED, not agreed: ${MIN_STOCK_COVER_PCT}% of the ${num(r.scheduledQty)} this row has scheduled, rounded to a planning step. It scales with the project, but no one has signed it off.`
+                          : 'A recorded level from MIN_STOCK_OVERRIDE.',
+                        r.minStockPartial ? 'Summed over only the projects that have one, so it under-states the material.' : '',
+                      ].filter(Boolean).join('\n')}>
                       {r.minStock == null ? '—' : num(r.minStock)}
                       {r.minStockPartial && <em className="gc-flag">!</em>}
+                    </span>
+                    <span className="gc gc-n gc-boh" title="Beginning on hand is 0 because the delivery workbook records no opening stock — it is a schedule of what will arrive, not a stock file. This is genuinely zero-as-unknown, not a measured empty shelf.">
+                      {num(r.boh)}
                     </span>
 
                     {/* In and Out in ONE column, two sub-rows, each the height of the
@@ -729,7 +738,6 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                           r.tbcIn ? `${r.tbcIn} more bar${r.tbcIn === 1 ? '' : 's'} carr${r.tbcIn === 1 ? 'ies' : 'y'} no agreed quantity (TBC in the source) and add nothing.` : '',
                           r.undatedInCount ? `${r.undatedInCount} scheduled deliver${r.undatedInCount === 1 ? 'y' : 'ies'} totalling ${num(r.undatedIn)} ${r.uom || ''} have NO target date in the source, so they cannot be placed on the timeline and are not counted here.`.replace(/\s+/g, ' ') : '',
                         ].filter(Boolean).join('\n')}>
-                          <em className="gf-tag">In</em>
                           {num(r.totalIn)}
                           {/* One chip for everything held OUT of the figure, so the
                               column always equals the bars drawn beside it. */}
@@ -738,7 +746,6 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                       )}
                       {L.showOut && (
                         <span className="gf gf-out" title={`Every outgoing bar on this row adds to ${num(r.totalOut)}.`}>
-                          <em className="gf-tag">Out</em>
                           {num(r.totalOut)}
                         </span>
                       )}
@@ -805,17 +812,18 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
           <div className="gtt-footbar" style={{ marginLeft: 'var(--gtt-left)', width: totalW, height: FOOT_H }}>
             <div className="gtt-capwin" title={capTitle}
               style={{ left: Math.min(Math.max(cursorX, CAPWIN_W / 2 + 4), Math.max(CAPWIN_W / 2 + 4, totalW - CAPWIN_W / 2 - 4)) }}>
-              <span className="gcw-hd"><Icon name="warehouse" size={11} /> Floor space</span>
+              {/* TWO LINES. It was six — a heading, the figure, a pallet-position count,
+                  a net line, a progress bar and a percentage caption — for a read-out
+                  that is explicitly provisional and travels over the chart. The figure
+                  and the net are the two things a reader is actually tracking as they
+                  drag the line; the position count, the bar and the heading all said
+                  something the tooltip says better, and the heading was labelling a
+                  number whose unit is printed right beside it. */}
               <strong className="gcw-m2">{cap.heldM2 < 10 ? cap.heldM2.toFixed(1) : num(cap.heldM2)}<em>m²</em></strong>
-              <span className="gcw-sub">{num(cap.heldPositions)} pallet positions</span>
-              <span className={`gcw-net ${cap.netM2 >= 0 ? 'up' : 'dn'}`}>
-                <Icon name={cap.netM2 >= 0 ? 'arrowUp' : 'arrowDown'} size={10} />
-                {cap.netM2 >= 0 ? '+' : '−'}{num(Math.abs(cap.netM2))} m² net
+              <span className="gcw-sub">
+                <b className={cap.netM2 >= 0 ? 'up' : 'dn'}>{cap.netM2 >= 0 ? '+' : '−'}{num(Math.abs(cap.netM2))}</b>
+                {' net · '}{heldPct.toFixed(0)}%<i className="gcw-of"> of Safekeeping</i>
               </span>
-              <span className="gcw-track" title={`${heldPct.toFixed(0)}% of the Safekeeping area's ${SAFEKEEPING_M2.toFixed(0)} m²`}>
-                <i style={{ width: `${Math.min(100, heldPct)}%` }} className={heldPct > 100 ? 'over' : ''} />
-              </span>
-              <span className="gcw-foot">{heldPct.toFixed(0)}% of Safekeeping · provisional</span>
             </div>
           </div>
           </div>
@@ -832,23 +840,24 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
       <p className="gtt-note">
         <Icon name="alert" size={12} />
         <span>
-          <strong>No outbound schedule exists.</strong> Nothing in the warehouse system plans a release,
-          so the <em>out</em> lane shows recorded pullouts only and is empty to the right of today.
-          A solid bar has fallen on or before today; a faded one is still ahead. Bars that overlap at this
-          zoom are merged and carry their combined quantity — a badge shows how many, and nothing is ever
-          merged across the today line. Quantities read <em>TBC</em> where the source has not agreed one;
-          those are excluded from every total rather than counted as zero. Floor space is a provisional estimate — hover it for the
-          arithmetic and the pack sizes it depends on.
-          {!hasMinStockData && <>{' '}<strong>Minimum stock level is not recorded anywhere</strong> in either
-            source workbook, so that column reads as a dash on every row rather than
-            showing a number nobody has set.</>}
-          {undatedTotal > 0 && <>{' '}<strong>{undatedTotal} scheduled deliveries carry no target date</strong> at
-            all in the source. They cannot be placed on a timeline, so they draw no bar and
-            are not counted in the In column — the <em>+n</em> beside a figure is how many
-            were held back, and its tooltip gives the quantity.</>}
-          {lag > 0 && <>{' '}Recorded receipts and pullouts come from the {fmtDate(TODAY)} stock
-            snapshot, so the last {lag} day{lag === 1 ? '' : 's'} before the today line carry no
-            movement yet — that gap is an export date, not a quiet warehouse.</>}
+          <strong>This card reads the delivery workbook only.</strong> It is a schedule of what is
+          due to ARRIVE, so there is no opening stock — BOH is 0 on every row — and every bar is a
+          scheduled delivery rather than a recorded one. A solid bar means its target has passed; a
+          faded one is still ahead.
+          {' '}<strong>Warehouse-bound rows only:</strong> {deliveryExcluded.total} of {deliveryExcluded.source} lines
+          are left out because they ship straight to a project site ({deliveryExcluded.siteBound}) or
+          record no destination at all ({deliveryExcluded.blank}).
+          {' '}Bars that overlap at this zoom are merged and carry their combined quantity — a badge
+          shows how many, and nothing is ever merged across the today line. Quantities read <em>TBC</em> where
+          the source has not agreed one; those are excluded from every total rather than counted as zero.
+          {!hasRealMinStock && <>{' '}<strong>Minimum stock level is modelled, not agreed</strong> — {MIN_STOCK_COVER_PCT}% of
+            what each project has scheduled for the material, rounded to a planning step. It scales with
+            the project but nobody has signed it off.</>}
+          {undatedTotal > 0 && <>{' '}{undatedTotal} scheduled deliveries carry no target date and cannot be
+            placed on a timeline, so they draw no bar and are not counted in the In column — the <em>+n</em> beside
+            a figure is how many were held back.</>}
+          {' '}There is no outbound schedule anywhere in this system, so the out lane is empty on every row.
+          Floor space is a provisional estimate — hover it for the arithmetic and the pack sizes it depends on.
         </span>
       </p>
     </div>

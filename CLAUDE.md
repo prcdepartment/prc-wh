@@ -36,7 +36,7 @@ Montserrat / Barlow Condensed, light + dark mode.
 
 **Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
 `inventory` (827), `ledger` (295), `safekeeping_soh` (189), `safekeeping_incoming` (305),
-`safekeeping_outgoing` (287), `delivery_tracker` (355). Read by all signed-in users;
+`safekeeping_outgoing` (287), `delivery_tracker` (355, of which 87 are warehouse-bound and shown). Read by all signed-in users;
 **only admins write**. Counts are the 2026-09-07 snapshot — they change with every
 import, so treat them as "roughly this size", not as a contract.
 

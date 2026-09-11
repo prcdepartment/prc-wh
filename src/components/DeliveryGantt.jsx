@@ -246,7 +246,7 @@ function itemTitle(item, row) {
     if (m.kind === 'planned') {
       const when = m.targetDate
         ? `${fmtDate(new Date(`${m.targetDate}T00:00:00`))} (firm)`
-        : `${fmtTargetText(m.targetText) || 'TBC'} — an estimate, so the bar spans the window the source commits to`
+        : `${fmtTargetText(m.targetText) || 'TBC'} (est.)`
       const extra = [m.location ? fmtTower(m.location) : '', m.dpPayment ? `DP ${m.dpPayment}` : ''].filter(Boolean).join(' · ')
       lines.push(`Scheduled · ${m.batch || 'Batch'} · ${when} · ${m.qty == null ? 'TBC' : num(m.qty)}${extra ? ` · ${extra}` : ''}`)
       if (m.opsRemarks) lines.push(`    Ops: ${m.opsRemarks}`)
@@ -347,15 +347,22 @@ function DetailPanel({ open, onClose }) {
           <section className="gp-m" key={i}>
             <div className="gp-m-head">
               <span className="gp-m-kind">{m.kind === 'planned' ? (m.batch || 'Scheduled') : 'Received'}</span>
-              <span className="gp-m-qty">{m.qty == null ? 'TBC' : num(m.qty)}{m.uom ? ` ${m.uom}` : ''}</span>
+              <span className="gp-m-qty">
+                {m.qty == null ? 'TBC' : num(m.qty)}
+                {m.uom && <em>{m.uom}</em>}
+              </span>
             </div>
             <dl className="gp-kv">
               <dt>{m.kind === 'planned' ? 'Target' : 'Date'}</dt>
+              {/* An estimate is marked "est." and nothing more. It used to carry a
+                  sentence explaining what an estimate implies about the bar's width,
+                  which is the sort of hint that belongs in documentation rather than
+                  beside every value on a card. A reader who wants the width explained
+                  can read the note once; a reader scanning ten deliveries should not
+                  have to step over the same sentence ten times. */}
               <dd>
                 {memberWhen(m)}
-                {m.kind === 'planned' && !m.targetDate && m.targetText && (
-                  <em className="gp-est"> estimate — the bar spans the window the source commits to</em>
-                )}
+                {m.kind === 'planned' && !m.targetDate && m.targetText && <em className="gp-est">est.</em>}
               </dd>
               {m.sourceItem && (<><dt>Item</dt><dd>{m.sourceItem}{m.brand ? ` · ${m.brand}` : ''}</dd></>)}
               <dt>Project</dt><dd>{row.isParent ? (m.project || row.project || '—') : row.project}</dd>
@@ -875,24 +882,20 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
       <p className="gtt-note">
         <Icon name="alert" size={12} />
         <span>
-          <strong>This card reads the delivery workbook only.</strong> It is a schedule of what is
-          due to ARRIVE, so there is no opening stock — BOH is 0 on every row — and every bar is a
-          scheduled delivery rather than a recorded one. A solid bar means its target has passed; a
-          faded one is still ahead.
-          {' '}<strong>Warehouse-bound rows only:</strong> {deliveryExcluded.total} of {deliveryExcluded.source} lines
-          are left out because they ship straight to a project site ({deliveryExcluded.siteBound}) or
-          record no destination at all ({deliveryExcluded.blank}).
-          {' '}Bars that overlap at this zoom are merged and carry their combined quantity — a badge
-          shows how many, and nothing is ever merged across the today line. Quantities read <em>TBC</em> where
-          the source has not agreed one; those are excluded from every total rather than counted as zero.
-          {!hasRealMinStock && <>{' '}<strong>Minimum stock level is modelled, not agreed</strong> — {MIN_STOCK_COVER_PCT}% of
-            what each project has scheduled for the material, rounded to a planning step. It scales with
-            the project but nobody has signed it off.</>}
-          {undatedTotal > 0 && <>{' '}{undatedTotal} scheduled deliveries carry no target date and cannot be
-            placed on a timeline, so they draw no bar and are not counted in the In column — the <em>+n</em> beside
-            a figure is how many were held back.</>}
-          {' '}There is no outbound schedule anywhere in this system, so the out lane is empty on every row.
-          Floor space is a provisional estimate — hover it for the arithmetic and the pack sizes it depends on.
+          {/* CAVEATS ONLY, STATED ONCE. This was ~200 words explaining how to read the
+              chart — what a faded bar means, why bars merge, what a badge counts. All of
+              that the chart shows for itself, and repeating it here was the same habit
+              as the per-value hints that came out of the panel. What stays is only the
+              facts that change how a NUMBER should be read, each in a clause: a reader
+              who does not know them would draw a wrong conclusion. */}
+          Source: delivery workbook only, warehouse-bound lines
+          ({deliveryExcluded.total} of {deliveryExcluded.source} excluded — {deliveryExcluded.siteBound} site-bound,
+          {' '}{deliveryExcluded.blank} no destination).
+          {' '}<strong>BOH is 0</strong> — the workbook records no opening stock, and nothing is scheduled out.
+          {' '}<em>TBC</em> quantities are excluded from totals.
+          {undatedTotal > 0 && <>{' '}{undatedTotal} undated deliveries are not counted (the <em>+n</em> beside a figure).</>}
+          {!hasRealMinStock && <>{' '}<strong>Min stock is modelled</strong> at {MIN_STOCK_COVER_PCT}% of what each project has scheduled.</>}
+          {' '}Floor space is provisional.
         </span>
       </p>
     </div>

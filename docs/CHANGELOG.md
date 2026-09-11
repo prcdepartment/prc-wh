@@ -3671,3 +3671,59 @@ and the four assumptions are plain numbers in source.
 3. **12 sets per pallet for plumbing fixtures** is the single biggest lever on the floor
    figure — plumbing alone is 1,142 of the 1,757 positions. A real pack size would move
    that number more than anything else in the model.
+
+### 2026-09-11 — Session: cut the hint prose, align qty/UOM, values in the ring legend
+
+**1. The hint sentences are gone, and the habit behind them with them.** "estimate — the
+bar spans the window the source commits to" sat beside every estimated date in the detail
+panel, and in the tooltip of every estimated bar. It is now the tag **est.** and nothing
+more. A reader scanning ten deliveries should not have to step over the same sentence ten
+times, and what an estimate implies about a bar's width belongs in documentation if
+anywhere.
+
+The same pass went over the rest of the visible prose, because the sentence was a symptom
+rather than the problem:
+
+* The card footnote was **~200 words explaining how to read the chart** — what a faded
+  bar means, why bars merge, what the merge badge counts, how the +n works. All of that
+  the chart shows for itself. It is **64 words** now and carries only the facts that
+  change how a NUMBER should be read, each as a clause: source and the excluded-line
+  counts, BOH is 0, TBC excluded, undated not counted, min stock modelled, floor space
+  provisional. A reader who did not know one of those would draw a wrong conclusion —
+  that is the test each surviving clause had to pass.
+* The ring's footer went from a sentence about what "priced from the inventory list"
+  means to the count itself: **"Modelled value. 1 priced, 3 assumed. 2 undated."**
+* Its three empty states were a sentence each and are now a phrase each ("Nothing
+  scheduled this month.", "5 deliveries, quantities TBC.", "34,032 units due, no modelled
+  price."). They still say three different things, which was the point of having three.
+
+**2. Qty and UOM align.** The UOM column was added last session without a rule of its own,
+so it was default-aligned and unsized: the figures sat right-aligned in a 62px column and
+the units started wherever the text happened to, so no two rows lined up. The number is
+now right-aligned against a fixed 44px unit column that is left-aligned. **Measured on a
+7-line delivery: every qty right edge at 1331, every UOM left edge at 1331 — one column
+each.** The per-delivery figure at the head of each block got the same treatment, its unit
+now an `<em>` at text weight with a real gap rather than being concatenated into the
+number's string.
+
+**3. The ring's legend carries a value as well as a share.** The percentage alone said how
+a month divides up but not how big it is — 60% of a quiet month read identically to 60% of
+a busy one. Each row is now `[swatch] Name  ₱25.5M  41%`, both figures in the condensed
+face at a FIXED width so the value column and the share column each line up down the list
+however long the names are; without that they slide row by row as the names change length,
+which is what makes a short list hard to scan. The exact peso figure, the unit count and
+the share to one decimal are on the row's tooltip.
+
+**Verified** at 1440x900 and 375x812, light and dark. The hint string is absent from the
+rendered page, from every tooltip, and from `dist/`. Panel line table: 7 rows, qty and UOM
+each on one edge, no cell clipped, number and unit never touching. Ring legend in August:
+four rows reading ₱25.5M/41%, ₱23.6M/38%, ₱7.7M/12%, ₱5.6M/9% — value column right edges
+all at 194, share column all at 224, no name clipped at 92px, nothing spilling the 208px
+column. At 375px the legend lays out horizontally with no page scroll and nothing
+overflowing. No console errors on a fresh tab.
+
+**Contrast: zero failures in both themes** — 23 pairs light (min 7.07) and 31 dark (min
+4.90) across the new tag, the two legend figure columns, the UOM cells and the trimmed
+note.
+
+`npm run build` passes.

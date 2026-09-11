@@ -121,10 +121,10 @@ export default function DeliveryMonthPie({ parents, cursor }) {
         // "nothing due", which is the opposite of two of them.
         <p className="gsp-none">
           {!m
-            ? 'Nothing is scheduled in this month. Drag the position line to a month that has deliveries.'
+            ? 'Nothing scheduled this month.'
             : totalQty <= 0
-              ? `${m.lines} deliver${m.lines === 1 ? 'y' : 'ies'} scheduled, every quantity still TBC.`
-              : `${num(totalQty)} units are due, but none of these materials has a modelled price, so there is no value to divide up.`}
+              ? `${m.lines} deliver${m.lines === 1 ? 'y' : 'ies'}, quantities TBC.`
+              : `${num(totalQty)} units due, no modelled price.`}
         </p>
       ) : (
         <>
@@ -141,29 +141,32 @@ export default function DeliveryMonthPie({ parents, cursor }) {
             <text className="gsp-mid-u" x="50" y="60">modelled</text>
           </svg>
 
+          {/* Value AND share per row. The percentage alone said how the month divides
+              up but not how big it is, so a 60% slice of a quiet month read the same as
+              60% of a busy one. The peso figure is abbreviated because the column is
+              ~190px wide; the exact figure and the unit count are on the row's tooltip. */}
           <ul className="gsp-legend">
             {paths.map((p, i) => (
-              <li key={i} title={`${p.s.name} — ${peso(p.s.value)} modelled · ${num(p.s.qty)} units`}>
+              <li key={i} title={`${p.s.name} — ${peso(p.s.value)} modelled · ${num(p.s.qty)} units · ${p.pct.toFixed(1)}% of the month`}>
                 <i style={{ background: p.colour }} />
                 <span className="gsp-nm">{p.s.name}</span>
-                <b>{p.pct.toFixed(0)}%</b>
+                <b className="gsp-val">{'₱' + compact(p.s.value)}</b>
+                <b className="gsp-pct">{p.pct.toFixed(0)}%</b>
               </li>
             ))}
           </ul>
         </>
       )}
 
+      {/* The priced/assumed split is the one thing that must not go unsaid — a peso
+          total made mostly of assumptions cannot read like a measured one — so it is a
+          count, not a paragraph. */}
       <p className="gsp-foot">
-        {/* The split between priced and assumed is the honest headline here — a peso
-            total made mostly of assumptions must not read like a measured one. */}
         <strong>Modelled value.</strong>{' '}
-        {cover.list > 0 || cover.assumed > 0
-          ? <>{cover.list} of {cover.list + cover.assumed + cover.none} material{cover.list + cover.assumed + cover.none === 1 ? '' : 's'} priced
-            from the inventory list{cover.assumed > 0 ? `, ${cover.assumed} assumed` : ''}
-            {cover.none > 0 ? `, ${cover.none} unpriced` : ''}.</>
-          : 'The source carries no price.'}
-        {m?.unpricedQty > 0 && ` ${num(m.unpricedQty)} units have no modelled rate and add no value.`}
-        {undated > 0 && ` ${undated} undated deliver${undated === 1 ? 'y is' : 'ies are'} in no month.`}
+        {cover.list + cover.assumed + cover.none > 0
+          ? <>{cover.list} priced{cover.assumed > 0 ? `, ${cover.assumed} assumed` : ''}{cover.none > 0 ? `, ${cover.none} unpriced` : ''}.</>
+          : 'No price in the source.'}
+        {undated > 0 && ` ${undated} undated.`}
       </p>
     </aside>
   )

@@ -813,7 +813,16 @@
 .gp-kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; margin: 0; }
 .gp-kv dt { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.02em; }
 .gp-kv dd { margin: 0; font-size: 11px; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
-.gp-est { font-style: normal; color: var(--text-muted); font-size: 10px; }
+/* "est." is a TAG, not a sentence. It replaced a line of prose explaining what an
+   estimate implies about a bar's width — a hint that belongs in the note under the chart
+   if anywhere, not beside every value on the card. */
+.gp-est {
+  font-style: normal; margin-left: 5px;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 1px 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
+}
 .gp-rem { color: var(--text-muted); line-height: 1.45; }
 .gp-mono { font-family: 'Consolas', 'SF Mono', monospace; font-size: 10.5px; }
 .gp-dash { color: var(--text-muted); }
@@ -833,10 +842,28 @@
    ("Floor Mounted, Wall Discharge two piece toilet…") and truncating it to one line
    would lose the part that identifies the fixture. */
 .gp-lines td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; color: var(--text-muted); }
+/* QTY AND UOM READ AS ONE PAIR, so they are laid out as one.
+   The UOM column was added without a rule of its own, which left it default-aligned and
+   unsized: the figures sat right-aligned in a 62px column and the units started wherever
+   the text happened to, so no two rows lined up. The number is now right-aligned hard
+   against a fixed 44px unit column that is left-aligned, which puts every "696 Sets" on
+   the same two edges all the way down. */
 .gp-lines th.n, .gp-lines td.n {
-  text-align: right; width: 62px; padding-right: 0;
+  text-align: right; width: 54px; padding-right: 6px;
   font-family: var(--gtt-figs); font-size: 12px; font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.gp-lines th.u, .gp-lines td.u {
+  text-align: left; width: 44px; padding-right: 0;
+  font-size: 10px; color: var(--text-muted); white-space: nowrap;
+}
+
+/* The per-delivery figure at the head of each block gets the same treatment: the number
+   in the condensed face, the unit beside it at text weight, so the pair reads as one
+   quantity rather than as a single long string. */
+.gp-m-qty em {
+  font-style: normal; font-family: var(--font); font-size: 10px; font-weight: 600;
+  color: var(--text-muted); margin-left: 3px;
 }
 
 .gp-foot {
@@ -897,16 +924,22 @@
 }
 
 .gsp-legend { width: 100%; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.gsp-legend li { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 9.5px; }
+.gsp-legend li { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 9.5px; }
 .gsp-legend i { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 2px; }
 .gsp-nm {
   flex: 1 1 auto; min-width: 0; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Two figures per row, both condensed and both a FIXED width, so the value column and
+   the share column each line up down the list however long the names are. Without the
+   fixed widths the two would slide left and right row by row as the names changed
+   length, which is what makes a short list hard to read at a glance. */
 .gsp-legend b {
-  flex: 0 0 auto; font-family: var(--gtt-figs); font-size: 11px; font-weight: 600;
-  color: var(--text-muted); font-variant-numeric: tabular-nums;
+  flex: 0 0 auto; font-family: var(--gtt-figs); font-weight: 600;
+  font-variant-numeric: tabular-nums; text-align: right;
 }
+.gsp-val { width: 46px; font-size: 11px; color: var(--text); }
+.gsp-pct { width: 26px; font-size: 10.5px; color: var(--text-muted); }
 
 .gsp-none, .gsp-foot { width: 100%; margin: 0; font-size: 9.5px; line-height: 1.45; color: var(--text-muted); }
 .gsp-none { padding: 14px 0; text-align: center; }

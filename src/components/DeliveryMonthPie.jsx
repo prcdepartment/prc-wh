@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { monthsFromParents, monthAt } from '../data/deliveryGantt'
+import { priceCoverage } from '../data/deliveryValue'
 import { Toggle } from './ui'
 import { categoricalFor } from '../lib/colors'
 import { useTheme } from '../context/ThemeContext'
-import { num } from '../lib/format'
+import { num, peso, compact } from '../lib/format'
 
 // ---------------------------------------------------------------------------
 // THE RING BESIDE THE CHART — the month the position line is standing in.
@@ -14,11 +15,15 @@ import { num } from '../lib/format'
 // follows it, which also means the ring, the EOH column and the floor-space read-out are
 // all answering for the same instant.
 //
-// IT COUNTS QUANTITY, NOT PESOS. The delivery workbook records a quantity and a unit of
-// measure for each line and carries no price on any sheet, and the tracker no longer
-// reads the stock workbook that had one. A peso figure would mean multiplying by a unit
-// cost nobody quoted for these deliveries — it would look authoritative and be invented.
-// The heading says "units", and the note under the chart says it again.
+// IT SHOWS MODELLED VALUE. The delivery workbook carries a quantity and a unit of
+// measure and no price at all, so every peso here comes from deliveryValue.js — three of
+// the seven materials priced off the real inventory list, four assumed outright because
+// the list does not stock them. That is a mock-up and the card says so: the footer names
+// how many of the month's materials are assumptions rather than letting a peso total
+// pass as measured.
+//
+// Quantity is still carried and still shown per slice, because the units are what take
+// floor space and the value is what takes budget — a reader planning either wants both.
 //
 // DRAWN BY HAND rather than with the shared DistributionDonut. That component is built
 // for a card-width ring with leader labels and a legend; at the ~200px this column gets
@@ -73,10 +78,18 @@ export default function DeliveryMonthPie({ parents, cursor }) {
     if (all.length <= MAX_SLICES) return all
     const head = all.slice(0, MAX_SLICES)
     const rest = all.slice(MAX_SLICES)
-    return [...head, { name: `Other (${rest.length})`, qty: rest.reduce((a, s) => a + s.qty, 0), other: true }]
+    return [...head, {
+      name: `Other (${rest.length})`,
+      qty: rest.reduce((a, s) => a + s.qty, 0),
+      value: rest.reduce((a, s) => a + s.value, 0),
+      other: true,
+    }]
   }, [m, cut])
 
-  const total = slices.reduce((a, s) => a + s.qty, 0)
+  // THE RING DIVIDES VALUE. Quantity rides along for the legend tooltips.
+  const total = slices.reduce((a, s) => a + s.value, 0)
+  const totalQty = slices.reduce((a, s) => a + s.qty, 0)
+  const cover = useMemo(() => priceCoverage(m?.materialNames || []), [m])
 
   // Geometry. The viewBox is square and the ring is centred in it, so the SVG can be
   // sized purely by CSS without the arcs drifting off-centre.
@@ -84,10 +97,10 @@ export default function DeliveryMonthPie({ parents, cursor }) {
   const RI = 27
   let angle = 0
   const paths = slices.map((s, i) => {
-    const sweep = total > 0 ? (s.qty / total) * Math.PI * 2 : 0
+    const sweep = total > 0 ? (s.value / total) * Math.PI * 2 : 0
     const d = arc(50, 50, R, RI, angle, angle + sweep)
     angle += sweep
-    return { d, s, colour: s.other ? 'var(--text-faint)' : PALETTE[i % PALETTE.length], pct: total > 0 ? (s.qty / total) * 100 : 0 }
+    return { d, s, colour: s.other ? 'var(--text-faint)' : PALETTE[i % PALETTE.length], pct: total > 0 ? (s.value / total) * 100 : 0 }
   })
 
   return (
@@ -104,29 +117,33 @@ export default function DeliveryMonthPie({ parents, cursor }) {
       <Toggle options={CUTS} value={cut} onChange={setCut} size="sm" className="gsp-cut toggle-icons" />
 
       {!m || total <= 0 ? (
-        // Two different nothings, and they must not read alike: no delivery at all in
-        // this month, versus deliveries whose quantities the source has not agreed.
+        // THREE different nothings, and they must not read alike. An empty ring means
+        // "nothing due", which is the opposite of two of them.
         <p className="gsp-none">
-          {m
-            ? `${m.lines} deliver${m.lines === 1 ? 'y' : 'ies'} scheduled, every quantity still TBC.`
-            : 'Nothing is scheduled in this month. Drag the position line to a month that has deliveries.'}
+          {!m
+            ? 'Nothing is scheduled in this month. Drag the position line to a month that has deliveries.'
+            : totalQty <= 0
+              ? `${m.lines} deliver${m.lines === 1 ? 'y' : 'ies'} scheduled, every quantity still TBC.`
+              : `${num(totalQty)} units are due, but none of these materials has a modelled price, so there is no value to divide up.`}
         </p>
       ) : (
         <>
           <svg className="gsp-ring" viewBox="0 0 100 100" role="img"
-            aria-label={`${slices.length} categories, largest ${slices[0]?.name} at ${paths[0]?.pct.toFixed(0)}%`}>
+            aria-label={`${slices.length} categories by modelled value, largest ${slices[0]?.name} at ${paths[0]?.pct.toFixed(0)}%`}>
             {paths.map((p, i) => (
               <path key={i} d={p.d} fill={p.colour}>
-                <title>{`${p.s.name} — ${num(p.s.qty)} units, ${p.pct.toFixed(0)}%`}</title>
+                <title>{`${p.s.name} — ${peso(p.s.value)} modelled, ${p.pct.toFixed(0)}% of the month · ${num(p.s.qty)} units`}</title>
               </path>
             ))}
-            <text className="gsp-mid" x="50" y="50">{num(total)}</text>
-            <text className="gsp-mid-u" x="50" y="61">units</text>
+            {/* Peso in the hole, because the ring is dividing pesos. Abbreviated: the
+                figures run into the millions and the hole is 54px across. */}
+            <text className="gsp-mid" x="50" y="49">{'₱' + compact(total)}</text>
+            <text className="gsp-mid-u" x="50" y="60">modelled</text>
           </svg>
 
           <ul className="gsp-legend">
             {paths.map((p, i) => (
-              <li key={i} title={`${p.s.name} — ${num(p.s.qty)} units`}>
+              <li key={i} title={`${p.s.name} — ${peso(p.s.value)} modelled · ${num(p.s.qty)} units`}>
                 <i style={{ background: p.colour }} />
                 <span className="gsp-nm">{p.s.name}</span>
                 <b>{p.pct.toFixed(0)}%</b>
@@ -137,7 +154,15 @@ export default function DeliveryMonthPie({ parents, cursor }) {
       )}
 
       <p className="gsp-foot">
-        Quantity, not value — the source carries no price.
+        {/* The split between priced and assumed is the honest headline here — a peso
+            total made mostly of assumptions must not read like a measured one. */}
+        <strong>Modelled value.</strong>{' '}
+        {cover.list > 0 || cover.assumed > 0
+          ? <>{cover.list} of {cover.list + cover.assumed + cover.none} material{cover.list + cover.assumed + cover.none === 1 ? '' : 's'} priced
+            from the inventory list{cover.assumed > 0 ? `, ${cover.assumed} assumed` : ''}
+            {cover.none > 0 ? `, ${cover.none} unpriced` : ''}.</>
+          : 'The source carries no price.'}
+        {m?.unpricedQty > 0 && ` ${num(m.unpricedQty)} units have no modelled rate and add no value.`}
         {undated > 0 && ` ${undated} undated deliver${undated === 1 ? 'y is' : 'ies are'} in no month.`}
       </p>
     </aside>

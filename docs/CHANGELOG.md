@@ -3562,3 +3562,112 @@ works here.
 **Open, and worth a decision:** the ring shows the month the line is standing in. The
 alternative reading is cumulative-to-the-line, which would match how EOH and the
 floor-space figure behave. Say which you want; the change is one function.
+
+### 2026-09-11 — Session: modelled value on the ring, honest floor space, UOM in the panel
+
+Four requests.
+
+**1. The project-count chip is gone and the sub rows carry full project names again.**
+`--gtt-desc` went 172px to 188px to pay for it — the chip's own width came back to the
+cell, and the names are long and share their ends (three open "4PH", three close with a
+municipality), so every pixel here buys a character of the part that tells them apart.
+Eight of ten still ellipsise, each keeping 18-20 of its 26-29 characters — "4PH Jenara
+Orchard…", "Southscapes Trece…" — so the distinguishing word survives and the full name
+is in the tooltip. The short names stay where they are genuinely short: the tags under
+each material row.
+
+**2. THE RING SHOWS MODELLED VALUE, and the modelling is the substance of this change.**
+
+Matching the tracker's materials against the 827 priced inventory lines by keyword was
+tried first and is not usable on its own. Checked line by line, a naive match returns:
+
+| keyword | what it actually matches | price |
+|---|---|---|
+| `coupler` | PPR **plumbing** couplings | PHP 2–132 |
+| `aluminum` | aluminium **duct tape**, foil tape | PHP 195–210 |
+| `kitchen cabinet` | a cabinet **light fixture** | PHP 1,106 |
+| `sealant` | sealant **guns** | PHP 600 |
+
+Every one of those looks like a price and is wrong by one to two orders of magnitude. A
+ring built on them would have been confidently, invisibly false — so `deliveryValue.js`
+splits the problem instead:
+
+* **Three materials are grounded in the price list**, with keywords narrowed to the lines
+  that genuinely describe them. Plumbing Fixtures is priced as a SET — water closet
+  11,250 + lavatory 2,744 + faucet 339 = **PHP 14,333**, because a set is what the
+  schedule ships. Wiring Devices **PHP 85** (median of the real switches). Rebar Coupler
+  **PHP 791**, with PPR couplings explicitly excluded — that exclusion is the whole
+  difference between a real figure and a hundredth of one.
+* **Four are assumptions**, because the price list does not stock them at all: Wooden
+  Door 4,500, Aluminum 8,000, Kitchen Cabinet 25,000, Sealant 250. Each carries its
+  reasoning in the table.
+
+The card never lets the split go unsaid. The ring's footer reads "1 of 4 materials priced
+from the inventory list, 3 assumed" for the month it is showing, and a material with no
+rate contributes quantity but no value and is reported rather than treated as free.
+`MIN_STOCK_OVERRIDE`-style replacement is the intended path: put real figures in and they
+win immediately.
+
+Slices are now ordered by VALUE, which changes what the ring says: in August, Kitchen
+Cabinet's 1,020 units lead at 41% ahead of Sealant's 30,666 at 12%. Ordering by quantity
+would have put the cheap bulk item first. Quantity is still on every slice's tooltip and
+in the header line — units are what take floor space, value is what takes budget.
+
+**3. The floor-space figure was reporting one number twice, and rounding in a way no
+warehouse can.** Both are fixed.
+
+* It computed a NET (in − out) and a HELD (opening + in − out) and printed both. With no
+  outbound anywhere in this system and no opening stock in the delivery workbook, out is
+  0 and BOH is 0 — so the two are the *same arithmetic*, and the read-out was showing the
+  identical figure on both lines. Verified before the fix: "973 m²" above "+973 net".
+  There is one figure now, and beside it the position count and the share of the
+  Safekeeping floor, which are things the m² does not already say.
+* It summed fractional pallets across every material and ceilinged the TOTAL — treating a
+  third of a pallet of sealant and a third of a pallet of doors as two thirds of one
+  position. **Two different materials do not share a pallet position**, so part-pallets
+  are rounded up per material now. On this data that is 1,753.7 exact pallets → 1,757
+  positions, so the correction is honest without being inflationary.
+* `UNITS_PER_PALLET` for Plumbing Fixtures went 24 → **12**. A set there is a water closet
+  plus a lavatory plus a faucet, and a water closet alone is close to a quarter of a
+  pallet footprint; 24 sets to a pallet implied half a water closet each, which is not a
+  pack that exists. Every line in that table now states the pack it assumes, so the
+  assumption can be argued with rather than the number it produces.
+
+The figure only grows as the line moves right, which is now correct by construction:
+nothing in this schedule ever leaves.
+
+**4. UOM in the detail panel.** The line-item table gained a UOM column, falling back to
+the delivery's own unit where a line does not carry one, and each delivery still lists
+its UOM in its own field. Verified: "Water Closet · — · 79 · Sets".
+
+**Verified.** A Node probe against the private masters, with the inventory hydrated so
+the price model runs on real figures: every material on the chart has a price entry or is
+reported unpriced; each month's material and project slices sum to that month's own
+modelled value; slices are value-ordered; floor space is monotonic in the cursor across
+five sampled dates; every row's position count is a whole number that never under-counts
+its pallets; and the per-material ceiling is never below the old total ceiling.
+
+In the browser at 1440x900 and 375x812, light and dark: count chips gone, full project
+names on the sub rows, UOM column populated, and the arithmetic checks out on screen —
+August 2026 reads PHP 62.4M over four arcs summing to 100%, with Kitchen Cabinet
+1,020 × 25,000 = 25.5M and Plumbing 1,646 × 14,333 = 23.6M. The floor read-out shows
+"1,128 m²" over "523 pos · 92% of Safekeeping" today and 257 m² / 119 pos / 21% at 10
+August, growing with the line. No page-level horizontal scroll, nothing spilling the ring
+column or the panel, the chart still fits its scrollport, and the read-out still clears
+the last row. No console errors on a fresh tab.
+
+**Contrast: zero failures in both themes** — 71 pairs light (min 4.57) and 67 dark (min
+4.90), including the peso figure in the ring's hole and the new footer.
+
+`npm run build` passes. `dist/` carries no price, no item description and no supplier
+name from the price list — the modelled rates are computed at runtime from hydrated data,
+and the four assumptions are plain numbers in source.
+
+**Open, and worth your decision:**
+1. **The four assumed prices** (door 4,500 · aluminium set 8,000 · kitchen cabinet 25,000
+   · sealant tube 250) are mine, not the company's. Replace them in `deliveryValue.js`
+   and the ring re-prices itself.
+2. **Rebar Coupler rests on a single price-list line.** It is real but thin.
+3. **12 sets per pallet for plumbing fixtures** is the single biggest lever on the floor
+   figure — plumbing alone is 1,142 of the 1,757 positions. A real pack size would move
+   that number more than anything else in the model.

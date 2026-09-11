@@ -28,6 +28,10 @@
 // ---------------------------------------------------------------------------
 
 import { deliveryRows } from './deliveryTracker'
+// Prices only — never quantities. The tracker's schedule still comes from the delivery
+// workbook alone; this is the modelled peso rate per material, and it is a mock-up that
+// says so on the card. See deliveryValue.js for what is grounded and what is assumed.
+import { materialPrices } from './deliveryValue'
 
 const DAY = 86400000
 
@@ -162,13 +166,21 @@ export const M2_PER_POSITION = (BAY_M2 / RACK_LEVELS) * AISLE_FACTOR  // ~2.16 m
 // Ask the warehouse team to correct them line by line. The window's tooltip prints the
 // value it used for each material next to the positions it produced, so a wrong one is
 // visible on the card rather than buried here.
+// Each line states the pack it assumes, so a warehouse reader can correct the ASSUMPTION
+// rather than argue with the number it produces. The unit is whatever the schedule counts
+// that material in — a "set" of plumbing fixtures is a water closet plus a lavatory plus
+// a faucet, which is why that figure is low and not a count of individual pieces.
 const UNITS_PER_PALLET = {
-  'Rebar Coupler & Accessories': 1500, // small grouted steel sleeves, bulk-boxed
+  'Rebar Coupler & Accessories': 1500, // grouted steel sleeves, bulk-boxed on a pallet
   'Kitchen Cabinet': 4,                // carcass sets, assumed flat-packed
   Sealant: 900,                        // ~24 tubes a carton, ~38 cartons a pallet
   Aluminum: 8,                         // glazed window/door sets, racked on edge
-  'Plumbing Fixtures': 24,             // mixed sanitary ware; water closets set the floor
-  'Wiring Devices': 2000,              // switches, outlets and plates, boxed
+  // 12, lowered from 24 on 2026-09-11. A SET here is a water closet plus a lavatory plus
+  // a faucet — the three the schedule ships together — and a water closet alone is close
+  // to a quarter of a pallet's footprint. 24 sets to a pallet implied half a water closet
+  // each, which is not a pack that exists.
+  'Plumbing Fixtures': 12,
+  'Wiring Devices': 2000,              // switches, outlets and cover plates, boxed
   'Wooden Door': 20,                   // door leaves, stacked flat
 }
 const UNITS_PER_PALLET_BY_UOM = { SET: 10, SETS: 10, PC: 300, PCS: 300, TUBE: 900, TUBES: 900, LM: 500 }
@@ -599,41 +611,48 @@ export function rowAt(row, cursor) {
 // adds to the floor over and above what leaves it — which is the figure requirement 8
 // names. Opening stock is reported alongside it, because the net alone does not answer
 // "will it fit"; the two together do.
+// Rewritten 2026-09-11, because the previous version reported one number twice and
+// rounded in a way the warehouse does not.
+//
+// WHAT WAS WRONG.
+//   * It computed a NET (in minus out) and a HELD (opening plus in minus out) and printed
+//     both. With no outbound anywhere in this system and no opening stock, out is 0 and
+//     BOH is 0 — so net and held are the same arithmetic, and the read-out was showing
+//     the identical figure on both of its lines.
+//   * It summed fractional pallets across every material and ceilinged the TOTAL. That
+//     treats a third of a pallet of sealant and a third of a pallet of doors as adding up
+//     to two thirds of one position, which no warehouse can do: two different materials
+//     do not share a pallet position. Part-pallets are rounded up PER MATERIAL now, which
+//     is what actually consumes floor.
+//
+// So there is one figure: the floor the deliveries that have landed by the cursor will
+// be occupying. It only grows as the line moves right, which is correct — nothing in
+// this schedule ever leaves.
 export function capacityAt(rows, cursor) {
-  let netUnits = 0
-  let netPallets = 0
-  let heldPallets = 0
-  let inUnits = 0
-  let outUnits = 0
+  let units = 0
+  let positions = 0
+  let exactPallets = 0
   const perRow = []
 
   for (const row of rows) {
-    const { inQty, outQty, eoh } = rowAt(row, cursor)
+    const { inQty } = rowAt(row, cursor)
+    if (inQty <= 0) continue
     const upp = unitsPerPallet(row.materialName, row.uom)
-    const net = inQty - outQty
-    const pallets = net / upp
-    netUnits += net
-    inUnits += inQty
-    outUnits += outQty
-    netPallets += pallets
-    heldPallets += Math.max(0, eoh) / upp
-    perRow.push({ key: row.key, name: row.materialName, project: row.project, net, pallets, upp, eoh })
+    const pallets = inQty / upp
+    // Ceilinged here, per material x project, not on the total — see the note above.
+    const rowPositions = Math.ceil(pallets)
+    units += inQty
+    exactPallets += pallets
+    positions += rowPositions
+    perRow.push({ key: row.key, name: row.materialName, project: row.project, qty: inQty, upp, positions: rowPositions })
   }
 
-  // Positions are whole: half a pallet still consumes a whole one. Rounded on the TOTAL
-  // rather than per row, so a hundred part-pallets do not inflate into a hundred whole
-  // ones. The net is rounded to nearest (it is a change, and ceiling its magnitude would
-  // overstate space freed as readily as space taken); what is HELD is ceilinged, because
-  // a part-full position is still a position nothing else can use.
-  const netPositions = Math.round(netPallets)
-  const heldPositions = Math.ceil(heldPallets)
   return {
-    netUnits, inUnits, outUnits,
-    netPallets, heldPallets,
-    netPositions, heldPositions,
-    netM2: netPositions * M2_PER_POSITION,
-    heldM2: heldPositions * M2_PER_POSITION,
-    perRow: perRow.sort((a, b) => Math.abs(b.pallets) - Math.abs(a.pallets)),
+    units,
+    positions,
+    exactPallets,
+    m2: positions * M2_PER_POSITION,
+    perRow: perRow.sort((a, b) => b.positions - a.positions),
   }
 }
 
@@ -663,8 +682,13 @@ export function monthsFromParents(parents) {
   const months = new Map()
   let undated = 0
   let undatedQty = 0
+  const priced = materialPrices()
 
   for (const p of parents) {
+    // The modelled peso rate for this material, or null where none is modelled. A
+    // material with no rate contributes quantity but no value, and the card says how
+    // many are in that state rather than quietly treating them as free.
+    const rate = priced[p.materialName]?.php ?? null
     for (const b of p.planned) {
       if (!b.start) {
         undated += 1
@@ -679,7 +703,8 @@ export function monthsFromParents(parents) {
           date: startOfMonth(b.start),
           label: b.start.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
           short: b.start.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }),
-          total: 0, lines: 0, tbc: 0,
+          total: 0, value: 0, lines: 0, tbc: 0, unpricedQty: 0,
+          materialsSeen: new Set(),
           byMaterial: new Map(),
           byProject: new Map(),
         }
@@ -687,22 +712,36 @@ export function monthsFromParents(parents) {
       }
       m.lines += 1
       if (b.qty == null) { m.tbc += 1; continue }
+      const val = rate != null ? b.qty * rate : 0
       m.total += b.qty
-      m.byMaterial.set(p.materialName, (m.byMaterial.get(p.materialName) || 0) + b.qty)
-      const proj = b.projectShort || b.project || '—'
-      m.byProject.set(proj, (m.byProject.get(proj) || 0) + b.qty)
+      m.value += val
+      if (rate == null) m.unpricedQty += b.qty
+      m.materialsSeen.add(p.materialName)
+      const bump = (map, k) => {
+        const cur = map.get(k) || { qty: 0, value: 0 }
+        cur.qty += b.qty
+        cur.value += val
+        map.set(k, cur)
+      }
+      bump(m.byMaterial, p.materialName)
+      bump(m.byProject, b.projectShort || b.project || '—')
     }
   }
 
   const list = [...months.values()].sort((a, b) => a.date - b.date)
+  // Sorted by VALUE, because value is what the ring now divides up — a big slice should
+  // be the one drawn first, and ordering by quantity would put a cheap bulk material
+  // ahead of an expensive one that dominates the ring.
   const slices = (map) => [...map.entries()]
-    .map(([name, qty]) => ({ name, qty, value: qty }))
-    .sort((a, b) => b.qty - a.qty)
+    .map(([name, v]) => ({ name, qty: v.qty, value: v.value }))
+    .sort((a, b) => b.value - a.value || b.qty - a.qty)
   for (const m of list) {
     m.materials = slices(m.byMaterial)
     m.projects = slices(m.byProject)
+    m.materialNames = [...m.materialsSeen]
     delete m.byMaterial
     delete m.byProject
+    delete m.materialsSeen
   }
   return { months: list, undated, undatedQty }
 }

@@ -376,7 +376,7 @@ function DetailPanel({ open, onClose }) {
             {m.lines?.length > 0 && (
               <table className="gp-lines">
                 <thead>
-                  <tr><th>Designation</th><th>Description</th><th className="n">Qty</th></tr>
+                  <tr><th>Designation</th><th>Description</th><th className="n">Qty</th><th className="u">UOM</th></tr>
                 </thead>
                 <tbody>
                   {m.lines.map((l, j) => (
@@ -384,6 +384,7 @@ function DetailPanel({ open, onClose }) {
                       <td>{l.designation || <span className="gp-dash">—</span>}</td>
                       <td title={l.description2}>{l.description2 || <span className="gp-dash">—</span>}</td>
                       <td className="n">{l.qty == null ? 'TBC' : num(l.qty)}</td>
+                      <td className="u">{l.uom || m.uom || <span className="gp-dash">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -566,23 +567,30 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
   const toggleAll = () => setExpanded(allOpen ? new Set() : new Set(parents.filter((p) => p.expandable).map((p) => p.key)))
   const anyExpandable = parents.some((p) => p.expandable)
 
-  const heldPct = SAFEKEEPING_M2 > 0 ? (cap.heldM2 / SAFEKEEPING_M2) * 100 : 0
+  const heldPct = SAFEKEEPING_M2 > 0 ? (cap.m2 / SAFEKEEPING_M2) * 100 : 0
   const cursorIsNow = startOfDay(cursor).getTime() === today.getTime()
 
   const capTitle = [
     'PROVISIONAL floor-space estimate.',
     '',
-    `Occupied  ${cap.heldM2.toFixed(0)} m2 from ${num(cap.heldPositions)} pallet positions`,
-    `Net move  ${cap.netUnits >= 0 ? '+' : ''}${num(cap.netUnits)} units = ${cap.netPositions >= 0 ? '+' : ''}${num(cap.netPositions)} positions = ${cap.netM2 >= 0 ? '+' : ''}${cap.netM2.toFixed(0)} m2`,
-    `Received  ${num(cap.inUnits)}   Issued ${num(cap.outUnits)}  (to ${fmtDate(cursor)})`,
+    `Floor    ${cap.m2.toFixed(0)} m2, from ${num(cap.positions)} pallet positions`,
+    `Landed   ${num(cap.units)} units delivered by ${fmtDate(cursor)}`,
+    '',
+    'It only grows as the line moves right, and that is correct: nothing in this schedule',
+    'ever leaves. There is no outbound anywhere in the system, and no opening stock in the',
+    'delivery workbook, so this is what the deliveries themselves put on the floor.',
     '',
     'Rack arithmetic is from the warehouse drawing: a Type B bay is 3.3 m x 1.29 m over five',
     `levels, and the plan's own rack pitch adds 2.53x for the aisle -> ${M2_PER_POSITION.toFixed(2)} m2 of floor per position.`,
     '',
+    'Part-pallets are rounded up PER MATERIAL, not on the total: two different materials do',
+    'not share a pallet position, so a third of a pallet of sealant and a third of a pallet',
+    `of doors are two positions, not one. Exact pallets ${cap.exactPallets.toFixed(1)} -> ${num(cap.positions)} positions.`,
+    '',
     'What is ESTIMATED is how many units fit a pallet, because no source workbook records a',
-    'pack size. Every figure above moves INVERSELY with these: double a pack size and',
-    'that material claims half the floor:',
-    ...cap.perRow.slice(0, 6).map((r) => `   ${r.name} — ${num(r.upp)}/pallet -> ${Math.round(Math.abs(r.pallets))} positions`),
+    'pack size. Every figure above moves INVERSELY with these: double a pack size and that',
+    'material claims half the floor:',
+    ...cap.perRow.slice(0, 6).map((r) => `   ${r.name} — ${num(r.qty)} at ${num(r.upp)}/pallet -> ${num(r.positions)} positions`),
     '',
     `Compared against the Safekeeping area's ${SAFEKEEPING_M2.toFixed(0)} m2 of floor (floor-plan geometry).`,
   ].join('\n')
@@ -722,7 +730,7 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                           full name stays in the tooltip. */}
                       <span className="gd-lines">
                         <span className="gd-name" title={r.isParent ? [r.materialName, r.brand, r.matDetail].filter(Boolean).join(' · ') : r.project}>
-                          {r.isParent ? r.materialName : r.projectShort || r.project}
+                          {r.isParent ? r.materialName : r.project}
                         </span>
                         {r.isParent && r.projectTags?.length > 0 && (
                           <span className="gd-tags" title={`For ${r.projects.join(', ')}`}>
@@ -730,7 +738,6 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                           </span>
                         )}
                       </span>
-                      {r.isParent && r.expandable && <em className="gd-count">{r.projectCount}</em>}
                     </span>
                     <span className={`gc gc-n gc-min ${r.minStock == null ? 'is-unset' : ''} ${r.minStockModelled ? 'is-modelled' : ''}`} title={r.minStock == null
                       ? `No minimum stock level for ${r.materialName} — nothing is scheduled for it on this row, so there is no scale to model one from.`
@@ -840,10 +847,16 @@ export default function DeliveryGantt({ parents, unit, onUnit, mode, onMode }) {
                   drag the line; the position count, the bar and the heading all said
                   something the tooltip says better, and the heading was labelling a
                   number whose unit is printed right beside it. */}
-              <strong className="gcw-m2">{cap.heldM2 < 10 ? cap.heldM2.toFixed(1) : num(cap.heldM2)}<em>m²</em></strong>
+              {/* ONE figure and what it is a share of. The second line used to carry a
+                  "net" that was arithmetically identical to the first — with nothing
+                  outbound and no opening stock, in-minus-out and opening-plus-in-minus-out
+                  are the same sum, so the window printed the same number twice. What
+                  actually adds something is the position count and the share of the
+                  Safekeeping floor. */}
+              <strong className="gcw-m2">{cap.m2 < 10 ? cap.m2.toFixed(1) : num(cap.m2)}<em>m²</em></strong>
               <span className="gcw-sub">
-                <b className={cap.netM2 >= 0 ? 'up' : 'dn'}>{cap.netM2 >= 0 ? '+' : '−'}{num(Math.abs(cap.netM2))}</b>
-                {' net · '}{heldPct.toFixed(0)}%<i className="gcw-of"> of Safekeeping</i>
+                <b>{num(cap.positions)}</b>
+                {' pos · '}{heldPct.toFixed(0)}%<i className="gcw-of"> of Safekeeping</i>
               </span>
             </div>
           </div>

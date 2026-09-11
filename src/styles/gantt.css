@@ -45,7 +45,11 @@
   /* Column widths. The left block is the sum of its four columns and is quoted to the
      grid as one track, because the whole block is what sticks — four independently
      sticky cells would each need their own cumulative `left` offset. */
-  --gtt-desc: 172px;
+  /* 188px, widened on 2026-09-11 when the project-count chip came off the parent
+     rows and the sub rows went back to FULL project names. The names are long and share
+     their ends (three open "4PH", three close with a municipality), so every pixel here
+     buys a character of the part that tells them apart. */
+  --gtt-desc: 188px;
   --gtt-num: 50px;
   --gtt-min: 46px;
   /* In and Out share ONE column of two stacked sub-rows, each exactly one lane tall so

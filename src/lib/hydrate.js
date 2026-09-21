@@ -26,6 +26,7 @@ import { rebuildItems } from '../data/insights'
 import { rebuildSafekeeping } from '../data/safekeeping'
 import { rebuildDeliveryRows } from '../data/deliveryTracker'
 import { setTransactions } from '../data/transactions'
+import { AUDIT_RATINGS, AUDIT_FINDINGS, AUDIT_COUNTS, rebuildAudit } from '../data/audit'
 
 // PostgREST caps a request at 1000 rows by default; page through anything larger.
 const PAGE = 1000
@@ -124,6 +125,32 @@ const toApproval = (r) => ({
   project: r.project, requestedBy: r.requested_by, date: new Date(r.created_at),
 })
 
+// ---- project warehouse audit ----
+// Three grains of the same audit, joined only by (audit_date, project). The dates come
+// back as 'YYYY-MM-DD' strings rather than Date objects because every audit view model
+// groups and compares them as strings ('2026-09'.slice, date < from), which a Date would
+// only make slower and more fragile.
+const toAuditRating = (r) => ({
+  id: r.id, date: day(r.audit_date), project: r.project || '', num: +r.criteria_num || 0,
+  criteria: r.criteria || '', weight: +r.weight || 0, rating: +r.rating || 0,
+})
+
+const toAuditFinding = (r) => ({
+  id: r.id, date: day(r.audit_date), type: r.project_type || '', project: r.project || '',
+  criteria: r.criteria || '', classification: r.classification || '', finding: r.finding || '',
+  rootCause: r.root_cause || '', actionPlan: r.action_plan || '',
+  timeline: day(r.timeline), closeDate: day(r.close_date), status: r.status || '',
+})
+
+const toAuditCount = (r) => ({
+  id: r.id, date: day(r.audit_date), project: r.project || '', assetType: r.asset_type || '',
+  itemCode: r.item_code || '', description: r.description || '', uom: r.uom || '',
+  unitCost: +r.unit_cost || 0, systemQty: +r.system_qty || 0, actualQty: +r.actual_qty || 0,
+  systemValue: +r.system_value || 0, actualValue: +r.actual_value || 0,
+  varianceValue: +r.variance_value || 0, variance: +r.variance || 0, accuracy: +r.accuracy || 0,
+  hitMiss: r.hit_miss || '', varianceType: r.variance_type || '',
+})
+
 const toAudit = (r) => ({
   id: r.id, user: r.user_email, action: r.action, detail: r.detail, date: new Date(r.created_at),
 })
@@ -151,7 +178,8 @@ async function run() {
   if (!session.session) return noData('not signed in')
 
   try {
-    const [inv, led, soh, skIn, skOut, del, proj, mov, res, pr, mr, appr, audit] = await Promise.all([
+    const [inv, led, soh, skIn, skOut, del, proj, mov, res, pr, mr, appr, audit,
+           auditRatings, auditFindings, auditCounts] = await Promise.all([
       fetchAll('inventory', 'id'),
       fetchAll('ledger', 'id'),
       fetchAll('safekeeping_soh', 'id'),
@@ -165,6 +193,9 @@ async function run() {
       fetchAll('material_requests', 'id'),
       fetchAll('approvals', 'id'),
       fetchAll('audit_log', 'id'),
+      fetchAll('audit_ratings', 'id'),
+      fetchAll('audit_findings', 'id'),
+      fetchAll('audit_counts', 'id'),
     ])
 
     // Postgres is the only source there is — src/data/ ships empty shells since the
@@ -177,6 +208,9 @@ async function run() {
     fill(OUTGOING_ROWS, skOut.map(toSkLog))
     fill(DELIVERY_TRACKER_ROWS, del.map(toDelivery))
     fill(PROJECTS, proj.map((r) => ({ code: r.code, name: r.name })))
+    fill(AUDIT_RATINGS, auditRatings.map(toAuditRating))
+    fill(AUDIT_FINDINGS, auditFindings.map(toAuditFinding))
+    fill(AUDIT_COUNTS, auditCounts.map(toAuditCount))
 
     // Transactional tables are authoritative even when empty — that is the point.
     setTransactions({
@@ -194,6 +228,9 @@ async function run() {
     rebuildSafekeeping()
     rebuildDeliveryRows()
     rebuildProjectCodes()
+    // Last, and independent of the rest: the audit dataset shares nothing with the
+    // stock modules, so it neither feeds nor depends on any of the rebuilds above.
+    rebuildAudit()
 
     return {
       source: 'postgres',
@@ -201,6 +238,7 @@ async function run() {
       counts: {
         inventory: inv.length, ledger: led.length, safekeeping: soh.length + skIn.length + skOut.length,
         delivery: del.length, movements: mov.length, reservations: res.length,
+        audit: auditRatings.length + auditFindings.length + auditCounts.length,
       },
     }
   } catch (e) {

@@ -25,6 +25,7 @@ const { SOH_ROWS, INCOMING_ROWS, OUTGOING_ROWS } = await import(dataUrl('safekee
 const { DELIVERY_TRACKER_ROWS } = await import(dataUrl('deliveryTrackerSheet.js'))
 const { PROJECTS } = await import(dataUrl('projects.js'))
 const { ITEM_MASTER } = await import(dataUrl('itemMaster.js'))
+const { AUDIT_RATINGS, AUDIT_FINDINGS, AUDIT_COUNTS } = await import(dataUrl('auditReport.js'))
 const { TRADES } = await import(srcUrl('trades.js'))
 
 // ---- SQL literal helpers -------------------------------------------------
@@ -166,6 +167,41 @@ add(
   )
 )
 
+// ---- project warehouse audit --------------------------------------------
+// Three grains, three tables, all keyed on the row's sheet position — so the
+// delete-past-the-high-water-mark guard above applies, and an audit workbook with
+// fewer rows than the last one replaces rather than merges.
+add(
+  insert(
+    'audit_ratings',
+    ['id', 'audit_date', 'project', 'criteria_num', 'criteria', 'weight', 'rating'],
+    AUDIT_RATINGS,
+    (r) => [n(r.id), d(r.date), q(r.project), n(r.num), q(r.criteria), n(r.weight), n(r.rating)]
+  )
+)
+add(
+  insert(
+    'audit_findings',
+    ['id', 'audit_date', 'project_type', 'project', 'criteria', 'classification', 'finding',
+      'root_cause', 'action_plan', 'timeline', 'close_date', 'status'],
+    AUDIT_FINDINGS,
+    (r) => [n(r.id), d(r.date), q(r.type), q(r.project), q(r.criteria), q(r.classification), q(r.finding),
+      q(r.rootCause), q(r.actionPlan), d(r.timeline), d(r.closeDate), q(r.status)]
+  )
+)
+add(
+  insert(
+    'audit_counts',
+    ['id', 'audit_date', 'project', 'asset_type', 'item_code', 'description', 'uom', 'unit_cost',
+      'system_qty', 'actual_qty', 'system_value', 'actual_value', 'variance_value', 'variance',
+      'accuracy', 'hit_miss', 'variance_type'],
+    AUDIT_COUNTS,
+    (r) => [n(r.id), d(r.date), q(r.project), q(r.assetType), q(r.itemCode), q(r.description), q(r.uom),
+      n(r.unitCost), n(r.systemQty), n(r.actualQty), n(r.systemValue), n(r.actualValue),
+      n(r.varianceValue), n(r.variance), n(r.accuracy), q(r.hitMiss), q(r.varianceType)]
+  )
+)
+
 // ---- write out, split into editor-sized files -----------------------------
 // Supabase's browser SQL Editor rejects a submission over roughly 1 MB, and the
 // whole dataset is ~1.1 MB. So the statements are packed into numbered files that
@@ -217,6 +253,8 @@ const counts = {
   inventory: inventory.length, ledger: LEDGER.length,
   safekeeping_soh: SOH_ROWS.length, safekeeping_incoming: INCOMING_ROWS.length,
   safekeeping_outgoing: OUTGOING_ROWS.length, delivery_tracker: DELIVERY_TRACKER_ROWS.length,
+  audit_ratings: AUDIT_RATINGS.length, audit_findings: AUDIT_FINDINGS.length,
+  audit_counts: AUDIT_COUNTS.length,
 }
 console.log(`Wrote ${written.length} file(s) to supabase/seed/ — paste them in order:`)
 for (const f of written) console.log(`  ${f.name}  ${String(f.kb).padStart(4)} KB`)

@@ -11,7 +11,8 @@
     "seed": "node scripts/generate-seeds.mjs",
     "model": "node scripts/generate-db-model.mjs && node scripts/generate-code-model.mjs",
     "import": "node scripts/import-snapshot.mjs",
-    "import:delivery": "node scripts/import-delivery-tracker.mjs"
+    "import:delivery": "node scripts/import-delivery-tracker.mjs",
+    "import:audit": "node scripts/import-audit-report.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

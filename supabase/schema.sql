@@ -278,6 +278,74 @@ create table if not exists public.delivery_tracker (
   prc_remarks  text
 );
 
+-- ---------- project warehouse audit (Audit Report Data Source workbook) ----------
+-- Three tables because they are three different grains, joined only by the audit they
+-- belong to (a date + a project), which is why that pair is indexed on all three:
+--   audit_ratings   one of five weighted inspection criteria scored on one audit
+--   audit_findings  one defect raised by one audit, with its status and action plan
+--   audit_counts    one item counted during one audit's inventory cycle count
+-- See supabase/migrations/2026-09-21_audit_report.sql for the column-level reasoning
+-- and scripts/import-audit-report.mjs for how the workbook is read.
+
+-- weight is the criterion's share of the 100% score (0.40 / 0.10 / 0.15 / 0.20 / 0.15);
+-- rating is the score EARNED against it, so an audit's overall rating is the plain sum
+-- of its five ratings and can never exceed 1.0.
+create table if not exists public.audit_ratings (
+  id           int primary key,
+  audit_date   date,
+  project      text,
+  criteria_num int,
+  criteria     text,
+  weight       numeric default 0,
+  rating       numeric default 0
+);
+create index if not exists audit_ratings_audit_idx on public.audit_ratings (audit_date, project);
+
+-- project_type is nullable and genuinely absent on part of the source (11 of 70
+-- audits). It is a property of the AUDIT and this is the only table carrying it;
+-- src/data/audit.js rebuilds the date+project -> type map from here and applies it to
+-- the ratings, which is what the Power BI model's relationship does.
+create table if not exists public.audit_findings (
+  id             int primary key,
+  audit_date     date,
+  project_type   text,
+  project        text,
+  criteria       text,
+  classification text,   -- 'Compliant' means "checked, nothing wrong" — kept, excluded per-visual
+  finding        text,
+  root_cause     text,
+  action_plan    text,
+  timeline       date,
+  close_date     date,
+  status         text
+);
+create index if not exists audit_findings_audit_idx on public.audit_findings (audit_date, project);
+create index if not exists audit_findings_status_idx on public.audit_findings (status);
+
+-- hit_miss is the auditor's own per-line verdict, stored rather than derived from
+-- variance so the app never disagrees with the signed count sheet. variance_value is
+-- the line's ABSOLUTE peso exposure (positive on all 3,244 source rows).
+create table if not exists public.audit_counts (
+  id             int primary key,
+  audit_date     date,
+  project        text,
+  asset_type     text,
+  item_code      text,
+  description    text,
+  uom            text,
+  unit_cost      numeric default 0,
+  system_qty     numeric default 0,
+  actual_qty     numeric default 0,
+  system_value   numeric default 0,
+  actual_value   numeric default 0,
+  variance_value numeric default 0,
+  variance       numeric default 0,
+  accuracy       numeric default 0,
+  hit_miss       text,
+  variance_type  text
+);
+create index if not exists audit_counts_audit_idx on public.audit_counts (audit_date, project);
+
 
 -- ============================================================
 -- TRANSACTIONAL TABLES — created EMPTY. Every row from here on is a real
@@ -398,7 +466,8 @@ declare
   t text;
   reference_tables text[] := array[
     'trades','projects','item_master','inventory','ledger',
-    'safekeeping_soh','safekeeping_incoming','safekeeping_outgoing','delivery_tracker'
+    'safekeeping_soh','safekeeping_incoming','safekeeping_outgoing','delivery_tracker',
+    'audit_ratings','audit_findings','audit_counts'
   ];
   transactional_tables text[] := array[
     'movements','reservations','purchase_requests','material_requests',

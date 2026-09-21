@@ -13,6 +13,10 @@ import Icon from '../lib/icons'
 // split out lazily — landing on Inventory (the default) shouldn't pay to parse them.
 const SafekeepingTab = lazy(() => import('./dashboard/SafekeepingTab'))
 const ExcessTab = lazy(() => import('./dashboard/ExcessTab'))
+// Audit is split out for the same reason, and harder: it carries three of its own
+// charts and the 3,244-line cycle-count table. None of that belongs in the chunk a
+// user downloads to look at stock levels.
+const AuditTab = lazy(() => import('./dashboard/AuditTab'))
 
 // Both modals are click-triggered, and AddMaterialModal pulls in the ~830 KB item
 // master. Splitting them keeps that weight off the dashboard's initial load entirely.
@@ -25,6 +29,11 @@ const TABS = [
   // label changes.
   { key: 'inventory', label: 'Warehouse', icon: 'inventory', title: 'Inventory Insights' },
   { key: 'safekeeping', label: 'Safekeeping', icon: 'vault', title: 'Safekeeping Insights' },
+  // Audit is the one tab whose dataset is not stock at all — it is the Project
+  // Warehouse Audit programme, scored per project per visit. It owns its own filter
+  // bar (see `ownsFilters` below) because the shared search bar's tokens are item
+  // codes and trades, which an audit row does not have.
+  { key: 'audit', label: 'Audit', icon: 'grade', title: 'Project Warehouse Audit', ownsFilters: true },
   { key: 'excess', label: 'Excess', icon: 'excess', title: 'Excess Materials', locked: true },
   { key: 'scrap', label: 'Scrap', icon: 'scrap', title: 'Scrap Materials', locked: true },
 ]
@@ -99,8 +108,13 @@ export default function Dashboard() {
           the row's right-most end, beside the search bar rather than beside the
           tabs. */}
       <div className="dash-toolbar-row" data-tour="header">
-        <FilterSearch tokens={tokens} onChange={setTokens} resultCount={pool.length} uoms={uoms}
-          noun={active === 'safekeeping' ? 'line' : 'material'} />
+        {/* A tab that owns its filters gets a spacer, not the material search bar:
+            applying an item-code token to an audit finding would narrow nothing and
+            imply the two datasets are the same one. */}
+        {tab.ownsFilters
+          ? <div className="dash-toolbar-spacer" />
+          : <FilterSearch tokens={tokens} onChange={setTokens} resultCount={pool.length} uoms={uoms}
+              noun={active === 'safekeeping' ? 'line' : 'material'} />}
         <NewTransactionMenu
           canCreate={allowedForms.length > 0}
           allowed={allowedForms}
@@ -135,6 +149,7 @@ export default function Dashboard() {
               it the tab would mount and render its first empty-pool frame before its
               212 KB of sheet data has actually arrived. */}
           {active === 'safekeeping' && (skSoh ? <SafekeepingTab pool={skPool} qtyUnit={qtyUnit} /> : <div className="page-loading">Loading…</div>)}
+          {active === 'audit' && <AuditTab />}
           {active === 'excess' && <ExcessTab />}
         </Suspense>
       </div>

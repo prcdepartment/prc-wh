@@ -2326,3 +2326,105 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 /* Inventory Composition's tiles are plain .kpi-grid now — no card-specific column
    overrides needed, the same responsive rules every other .kpi-grid page uses apply
    here too. */
+
+/* ===========================================================================
+   AUDIT TAB (Dashboard -> Audit)
+   The Project Warehouse Audit dashboard: its own filter bar, a weighted
+   scorecard, and tables that hold whole paragraphs of the auditor's prose
+   rather than the short codes the stock tables carry.
+   =========================================================================== */
+
+/* The Audit tab has no material search bar (an item-code token cannot narrow an
+   audit finding), so the toolbar row needs something to hold the left side open —
+   otherwise + New Transaction slides from the right edge to the left one the moment
+   the tab changes, which reads as the whole header moving. */
+.dash-toolbar-spacer { flex: 1 1 auto; min-width: 0; }
+
+/* ---- filter bar ---- */
+/* Sits between the sub-tabs and the first card, on one line at desktop width. It is
+   deliberately NOT styled as a card: it is chrome for everything below it, and a
+   bordered panel here would read as the first of the cards it filters. */
+.audit-filters {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px; padding: 9px 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+}
+.audit-filters-label {
+  display: inline-flex; align-items: center; gap: 6px; margin-right: 2px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.audit-filters > .field.lookup { flex: 0 1 auto; margin: 0; }
+
+/* ---- criteria switcher on the Findings view ---- */
+.audit-crit-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.audit-crit-note { font-size: 12px; min-width: 0; }
+
+/* Two-up card rows align to the top: the scorecard and the month chart are different
+   natural heights and stretching the shorter one leaves a band of dead card. */
+.audit-grid { align-items: start; }
+
+/* ---- weighted scorecard ---- */
+/* Five rows plus a total, on one grid so the number columns line up down the card:
+   [no] [icon] [name + note + bar] [weight] [rating]. The two figure columns are
+   fixed-width and tabular — they are read as a column, not as sentence-final words. */
+.scorecard { display: flex; flex-direction: column; gap: 2px; }
+.sc-row {
+  display: grid; grid-template-columns: 20px 22px minmax(0, 1fr) 54px 54px;
+  align-items: center; gap: 10px; padding: 9px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sc-row:last-child { border-bottom: 0; }
+.sc-no { font-size: 11px; font-weight: 800; color: var(--text-faint); text-align: center; }
+.sc-icon { display: grid; place-items: center; }
+.sc-body { min-width: 0; }
+.sc-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.sc-note { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+/* The bar is the criterion's rating as a share of its OWN weight, which is the only
+   way the five rows compare: 11 out of 15 and 15 out of 20 are the same performance
+   and different numbers. */
+.sc-bar { height: 5px; border-radius: 3px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+:root[data-theme='dark'] .sc-bar { background: var(--border); }
+.sc-bar-fill { display: block; height: 100%; border-radius: 3px; }
+.sc-weight { font-size: 12px; font-weight: 700; color: var(--text-muted); text-align: right; }
+.sc-rating { font-size: 14px; font-weight: 800; text-align: right; }
+.sc-total { margin-top: 4px; border-top: 1.5px solid var(--border-strong); border-bottom: 0; padding-top: 11px; }
+.sc-total .sc-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+.sc-total .sc-rating { color: var(--text); font-size: 16px; }
+
+/* ---- audit tables ---- */
+/* The shared table.data sets white-space: nowrap, which is right for item codes and
+   wrong for a three-sentence action plan. These cells wrap and cap their line count
+   instead, so a row stays one screen-height's worth of reading. */
+.au-wrap { white-space: normal; line-height: 1.45; display: flex; flex-direction: column; gap: 2px; }
+table.data td .au-wrap { max-width: 460px; }
+.au-strong { font-weight: 700; color: var(--text); }
+.au-faint { font-size: 11px; color: var(--text-muted); }
+.au-item { display: flex; flex-direction: column; gap: 1px; white-space: normal; max-width: 420px; }
+.au-neg { color: var(--danger); font-weight: 700; }
+.au-pos { color: var(--ok); font-weight: 700; }
+.au-wrap .badge { align-self: flex-start; }
+
+/* A four-tile KPI row, for the Record Accuracy view. The six-tile default row is the
+   shared .kpi-grid; this is the same tiles at four columns. */
+.kpi-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* An inline text button inside a card footer — used by the aging chart's "show all"
+   escape hatch, where a real .btn would outweigh the sentence around it. */
+.link-btn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; color: var(--brand-red); font-weight: 700; text-decoration: underline;
+}
+.link-btn:hover { color: var(--brand-red-dark, var(--brand-red)); }
+
+@media (max-width: 1100px) {
+  .kpi-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .audit-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  /* Each select takes a full row rather than compressing to a width where the
+     placeholder ("All Project Types") no longer fits. */
+  .audit-filters { flex-direction: column; align-items: stretch; }
+  .audit-filters > .field.lookup { width: 100%; }
+  table.data td .au-wrap, .au-item { max-width: 240px; }
+}

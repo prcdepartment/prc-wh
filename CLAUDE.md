@@ -36,9 +36,21 @@ Montserrat / Barlow Condensed, light + dark mode.
 
 **Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
 `inventory` (827), `ledger` (295), `safekeeping_soh` (189), `safekeeping_incoming` (305),
-`safekeeping_outgoing` (287), `delivery_tracker` (355, of which 87 are warehouse-bound and shown). Read by all signed-in users;
+`safekeeping_outgoing` (287), `delivery_tracker` (355, of which 87 are warehouse-bound and shown),
+`audit_ratings` (350), `audit_findings` (592), `audit_counts` (3,244). Read by all signed-in users;
 **only admins write**. Counts are the 2026-09-07 snapshot — they change with every
 import, so treat them as "roughly this size", not as a contract.
+
+**The audit dataset is a THIRD dataset, not part of the stock one.** The three
+`audit_*` tables come from the Project Warehouse Audit programme — projects audited on a
+date, scored against five weighted criteria — and share nothing with inventory but a
+project name. They are joined to each other only by `(audit_date, project)`, which is
+what an "audit" is. `src/data/audit.js` holds every view model as a pure function of a
+row set; `src/data/auditCriteria.js` holds the audit form's own criteria order and
+wording (the instrument, not the results — the only audit file NOT loaded from Postgres,
+for the same reason `trades.js` is not). Project Type lives only on the findings rows and
+is rebuilt there into a per-audit map, because the ratings table has no such column and
+the Power BI report resolves it through a relationship.
 
 **Empty transactional tables** — `movements`, `reservations`, `purchase_requests`,
 `material_requests`, `approvals`, `safekeeping_requests`, `audit_log`. Any signed-in user
@@ -59,17 +71,20 @@ Consequence: **arrays in `src/data/` must be mutated, never reassigned.** A
 **Refreshing the data from a new warehouse workbook — the whole loop:**
 
 ```bash
-npm run import -- "sample/<stock workbook>.xlsx"           # inventory / ledger / safekeeping
+npm run import -- "sample/<stock workbook>.xlsx"            # inventory / ledger / safekeeping
 npm run import:delivery -- "sample/<delivery workbook>.xlsx" # delivery_tracker only
-npm run seed                                                # /private-data/*.js -> supabase/seed/NN_seed.sql
+npm run import:audit -- "sample/<audit workbook>.xlsx"       # audit_ratings / findings / counts
+npm run seed                                                 # /private-data/*.js -> supabase/seed/NN_seed.sql
 ```
 
-**Two importers, because they read two different files.** `import-snapshot.mjs` handles
-the monthly stock workbook; `import-delivery-tracker.mjs` handles the OSM Delivery Tracker,
-whose sheet is hierarchical (trade > item > project > batch > line item, with the batch
-level merged and carrying the target date). Each documents its own reading rules and
-prints a report — read the report, it is where a bad workbook shows up. Only run the one
-whose source actually changed.
+**Three importers, because they read three different files.** `import-snapshot.mjs`
+handles the monthly stock workbook; `import-delivery-tracker.mjs` handles the OSM Delivery
+Tracker, whose sheet is hierarchical (trade > item > project > batch > line item, with the
+batch level merged and carrying the target date); `import-audit-report.mjs` handles the
+Audit Report Data Source, reading three of its ten sheets and skipping the five hidden ones
+(they are partial working copies of the same records — reading them would double-count).
+Each documents its own reading rules and prints a report — read the report, it is where a
+bad workbook shows up. Only run the one whose source actually changed.
 
 After a STOCK import, update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`.
 Then run any pending file in `supabase/migrations/` and paste the seed parts into the
@@ -121,6 +136,21 @@ npm run dev      # http://localhost:5173
 npm run build    # -> dist/
 npm run preview
 ```
+
+## Dashboard tabs
+
+`src/pages/Dashboard.jsx` is a shell: a shared toolbar, a tab strip, and one tab
+component per dataset. `Warehouse` (the default) and `Safekeeping` run off the stock
+pool the shell filters with `FilterSearch`; `Audit` sets `ownsFilters: true` on its TAB
+entry, which swaps the shared search bar for a spacer so the tab can carry its own
+filter row — an item-code token cannot narrow an audit finding, and offering one would
+imply the two datasets are the same. `Excess` and `Scrap` are still locked placeholders.
+
+The Audit tab's three sub-views are the three visible pages of
+`MCC. PRC. WM. Project Warehouse Audit Report. 2026.pbix`, and **every figure was
+reconciled against that report's own rendered numbers** (unfiltered and under each
+Project Type split) before any of it was drawn — see the 2026-09-21 changelog entry for
+the reconciliation table and for the one visual that deliberately does not match.
 
 ## Changelog
 

@@ -3727,3 +3727,202 @@ overflowing. No console errors on a fresh tab.
 note.
 
 `npm run build` passes.
+
+### 2026-09-21 — Session: An Audit tab in the Dashboard, built from the audit workbook
+
+**What was asked.** A new **Audit** tab in the Dashboard, reproducing the visuals in
+eleven screenshots of the Power BI report *Project Warehouse Audit Report*, with
+`sample/Audit Report Data Source.xlsx` as the data source.
+
+**What exists now.** `Dashboard → Audit`, three sub-views deep (Summary · Record Accuracy ·
+Findings), over three new Postgres tables, with its own filter bar. New files:
+`scripts/import-audit-report.mjs`, `src/data/audit.js`, `src/data/auditCriteria.js`,
+`src/components/AuditCharts.jsx`, `src/pages/dashboard/AuditTab.jsx`,
+`supabase/migrations/2026-09-21_audit_report.sql`.
+
+---
+
+#### 1. The workbook, and which of its ten sheets are real
+
+Five of the ten sheets are hidden, and the hidden ones are **earlier partial copies of
+the same records** — `Status2` holds 53 of the 592 findings, `SUM` 46, `IRA` 6, `IC` the
+scorecard again at a different grain. The Power BI model binds none of them. Reading any
+of them would double-count, and it is exactly the trap a "just load every sheet" importer
+falls into. Three sheets are read:
+
+| sheet | rows | what it is |
+|---|---|---|
+| `Ratings per Findings` | 350 | 70 audits x 5 weighted inspection criteria — the scorecard |
+| `Audit Findings` | 592 | one row per defect raised, with status, root cause, action plan |
+| `Inventory Cylce Count` | 3,244 | every line counted in a cycle count (the typo is the source's) |
+
+Deliberately skipped: `Schedule` and `Q4` (the audit calendar — it drives only the
+report's HIDDEN fourth page, which is scheduling rather than audit results) and `Terms`
+(a root-cause to People/Process/Tools lookup the model does not use; the findings sheet's
+own Root Cause column already carries that prefix inline wherever the auditor wrote one).
+
+**Project Type is the one piece of the model that is not in the table that needs it.**
+`Ratings per Findings` has no such column, yet the report's Project Type slicer visibly
+changes the scorecard — Power BI resolves it through a relationship. So it is treated as
+a property of an *audit* (a date x project pair), rebuilt from the findings rows and
+applied to all three tables. That reading is not a guess: across all 592 findings there
+is **not one row whose own type disagrees with its audit's, and not one blank-typed row
+inside a typed audit**. 11 of the 70 audits carry no type at all; they stay untyped and
+the filter offers them as "Unclassified" (the report shows them as "(Blank)").
+
+---
+
+#### 2. Reconciled against the report before anything was drawn
+
+The .pbix was opened as a ZIP and its `Report/definition/**/visual.json` read, so each
+visual's actual field bindings, aggregations and filters are known rather than inferred
+from a screenshot. Then every number was recomputed from the workbook and compared with
+the report's own rendered figures:
+
+| checked | result |
+|---|---|
+| criteria averages, unfiltered | 34 / 10 / 11 / 15 / 13 → **83%** ✔ |
+| the 13 monthly ratings | 89 88 98 74 73 84 / 74 80 77 81 78 88 90 ✔ |
+| Vertical split | 34/10/11/15/12 → 82%, and all 12 of its months ✔ |
+| Horizontal split | 30/10/12/14/11 → 77%, and all 8 of its months ✔ |
+| untyped ("(Blank)") split | 38/9/14/18/14 → 93%, and all 6 of its months ✔ |
+| HIT/MISS per month + accuracy line | 92 87 100 65 56 82 / 88 87 93 91 86 94 96 ✔ |
+| Sum of Variance Value by month | 6.0 14.5 8.5 7.3 13.3 1.7 20.7 3.9 (M) ✔ |
+| variance table grand totals | 7,965,419.42 / 8,227,142.44 / 527,458.08 ✔ |
+| findings raised/closed/cumulative | all four criteria, all 13 months ✔ |
+| aging buckets | all four criteria ✔ (see 4 below) |
+
+**Two measurement traps worth keeping.** A month's rating is the mean of each audit's
+TOTAL, and an audit's total is the SUM of its five criteria ratings — they are already
+weighted, so averaging the 5 rows instead of summing them reads 17% and looks plausible.
+And the "Financial Impact" bars are grouped by **month across years** (February is 2025
+and 2026 in one bar), not by month of a timeline; the app keeps that, because it is the
+report people know, and puts the years it merges in the tooltip so the bar cannot be
+misread as one month's number.
+
+---
+
+#### 3. The one visual that deliberately does NOT match: Top 5 High Risk Audit Areas
+
+Its own numbers do not reconcile with its own source, and the `visual.json` says why. The
+chart carries a **Top-N filter on the FINDINGS TEXT column, ordered by
+`Min(Findings)` descending** — which ranks the auditor's prose alphabetically. It
+silently keeps only the six alphabetically-last finding sentences before counting
+anything. That is why:
+
+* the unfiltered chart reads **9, 1, 1, 1** out of 201 open findings;
+* Vertical (11) + Horizontal (10) + blank (6) do not add to the total's 12 — each
+  filter context re-picks a different six sentences;
+* the Q1-2025 view shows *Storage of Chemicals = 6* while that quarter has 12 open.
+
+Eight candidate measures were tested against the screenshots (open counts, distinct root
+causes, distinct finding texts, distinct projects, distinct audits, latest-audit-only,
+the hidden `Status2` sheet, and the alphabetical Top-6 itself) and none reproduces all
+the screenshots, because the ordering is arbitrary. So **this app computes what the title
+promises**: the five classifications with the most findings still open, excluding
+`Compliant` and `Inventory Record Accuracy` (the report's own two categorical
+exclusions). Unfiltered that is 36 / 36 / 28 / 28 / 18. The card's footer says so on
+screen rather than hiding the deviation.
+
+---
+
+#### 4. The aging chart shows five bands; the report shows four
+
+The report's aging visual filters its own category axis to `0-30`, `61-90`, `91-120`,
+`over 120` — **`31-60` is excluded** — so its bars add up to less than its own open
+count (58 bars against 69 open on Security and Safety). All five bands are kept here.
+Recomputing the report's four with a swept anchor date pins its last refresh to
+**2026-09-16..19** and reproduces every visible label exactly, which is what confirms
+the band definition: days since the DATE OF AUDIT, bucketed 0-30 / 31-60 / 61-90 /
+91-120 / 120+.
+
+Aging is a live fact, so the app ages against today's real date rather than the stock
+snapshot's `TODAY` (they are different datasets, and the audit workbook runs to
+2026-09-18 while `TODAY` is 2026-09-07 — anchoring on the stock date would produce
+negative ages). The anchor is floored at the latest audit on file so a workbook ahead of
+the clock can never go negative, and every aging card prints "as of <date>".
+
+---
+
+#### 5. What the app adds over the report
+
+* **The scorecard is a bar, not just two numbers.** A criterion's rating is a score out
+  of its OWN weight, so "11% of 15%" and "15% of 20%" are not comparable as numbers and
+  are immediately comparable as a filled bar. Each row also carries a one-line
+  explanation of what that criterion inspects.
+* **A KPI row** the report has no equivalent of: audits conducted, overall rating, open
+  findings, closure rate, record accuracy, count exposure.
+* **An average reference line** on the monthly ratings, and grade colour on every bar
+  (green from 85%, amber from 75%, red below) so the bad months are found before a number
+  is read.
+* **Open risk by root cause** — the People / Process / Tools split the audit's own
+  taxonomy implies, read off the front of the root-cause text where the auditor wrote one
+  (114 / 37 / 30 of the 201 open; the remaining 20 are free text with no prefix and are
+  not invented into a theme).
+* **The aging bands are clickable**, filtering the findings table beneath them — 71
+  records for "Over 120 days" on Operations.
+* **Findings are aged in the table too**, in days, and open ones sort to the top oldest-first.
+* **Row counts per project** on the root-cause table, so a cause affecting five projects
+  reads differently from one affecting one.
+
+---
+
+#### 6. Data-quality fixes made in the importer, and the ones deliberately not made
+
+Fixed, because each one splits a chart category or prints a nonsense value:
+`Status` written five ways ("Closed", "Closed ", "closed", "Open", "N/A") folds to three
+meanings; trailing spaces and embedded newlines collapse ("Warehouse Organization ",
+"Technical Skills of / Warehouse Personnel"); the classification typo "Warehosue Plan"
+(1 row against 25); **461 of the 3,244 count rows have a UOM cell Excel stored as the
+number 0** — a blank the sheet's formatting filled in, now read as "no unit recorded"
+rather than printing a unit called "0" beside a quantity; one unit spelled five ways
+(`pc`/`PC`/`pcs`/`PCS`/`PC/S`) folds case- and punctuation-insensitively in the item
+table, so a cell no longer lists five "different" units for one item.
+
+**Not fixed:** the auditor's prose. Findings, root causes and action plans appear exactly
+as written, typos included — it is the audit record. `Compliant` stays a classification
+(91 of 592 rows: it means "checked, nothing wrong") and is excluded per-visual rather
+than dropped at import, because dropping it would overstate how much of each audit went
+badly. A real disagreement in units (`meter` vs `lm` vs `box` on one item) is still
+shown, because it is why summing that item across counts is approximate.
+
+---
+
+#### 7. Plumbing
+
+* **Three tables, not one** (`audit_ratings`, `audit_findings`, `audit_counts`): three
+  different grains that nothing joins row-to-row. A rating is one of five scores for one
+  audit, a finding is one defect it raised, a count line is one item it counted. The only
+  thing they share is `(audit_date, project)`, which is indexed on all three. Reference
+  tables: every signed-in user reads, only admins write — the migration applies the same
+  RLS policies every other seeded table gets, and `schema.sql`'s policy loop now lists
+  them so a fresh setup is identical.
+* `src/lib/hydrate.js` fetches all three and calls `rebuildAudit()` last — the audit
+  dataset shares nothing with the stock modules, so it neither feeds nor depends on any
+  other rebuild. Dates are kept as 'YYYY-MM-DD' strings, not Date objects: every
+  audit view model groups and compares them as strings.
+* `AuditTab` is lazily imported like Safekeeping and Excess. It is 26 KB, gzipped to 7.6 —
+  three of its own charts and a 3,244-line table have no business in the chunk someone
+  downloads to look at stock levels.
+* `npm run import:audit` is the new command; `npm run seed` now emits 6 parts (was 5).
+
+**Responsive and theme fixes found by measuring, not guessing.**
+[1] June's 724-line stack put its own value label underneath the accuracy line's
+"91%" and neither could be read — the left axis now scales to 1.5x its own maximum,
+which keeps the tallest stack clear of the line's label band at every selection.
+[2] The average reference line's label was clipped to "a" by the plot edge; the right
+gutter is now its width. [3] At 375px, 13 months of value labels overprinted ("88%"
+and "90%" merged), so below 900px the printed values come off and the axis and tooltip
+carry them. [4] The month axis itself rendered as one word — FebMaAprMaAugSep... — so
+on narrow screens every other month is drawn, with a year-opening month always drawn
+whatever its parity, since it is the tick carrying the year beneath it.
+
+**Verified in the browser** at 1440x900 and 375x812, light and dark: no horizontal page
+overflow at either width (scrollWidth === innerWidth at 375), no console errors, chart
+value labels resolving to #f2f1f1 in dark mode, the Horizontal filter reproducing the
+report's 77% / 30-10-12-14-11 scorecard and all 8 of its monthly bars, and the aging
+band click-through going 265 records to 71 and back. `npm run build` passes.
+
+**To bring this live:** run `supabase/migrations/2026-09-21_audit_report.sql` in the
+Supabase SQL Editor, then paste `supabase/seed/01..06_seed.sql` in order. Until then the
+tab renders its own empty state naming the missing table rather than drawing zeroes.

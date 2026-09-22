@@ -35,10 +35,10 @@ Montserrat / Barlow Condensed, light + dark mode.
 ## Data architecture (Phase 2, 2026-08-16)
 
 **Seeded reference tables** — `trades`, `projects`, `item_master` (7,378),
-`inventory` (827), `ledger` (295), `safekeeping_soh` (189), `safekeeping_incoming` (305),
-`safekeeping_outgoing` (287), `delivery_tracker` (355, of which 87 are warehouse-bound and shown),
+`inventory` (770), `ledger` (333), `safekeeping_soh` (245), `safekeeping_incoming` (315),
+`safekeeping_outgoing` (330), `delivery_tracker` (355, of which 87 are warehouse-bound and shown),
 `audit_ratings` (350), `audit_findings` (592), `audit_counts` (3,244). Read by all signed-in users;
-**only admins write**. Counts are the 2026-09-07 snapshot — they change with every
+**only admins write**. Counts are the 2026-09-21 snapshot — they change with every
 import, so treat them as "roughly this size", not as a contract.
 
 **The audit dataset is a THIRD dataset, not part of the stock one.** The three

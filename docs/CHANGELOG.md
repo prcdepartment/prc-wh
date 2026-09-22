@@ -3982,3 +3982,91 @@ parts 04, 05 and 06. Parts 01–03 completed and every insert is `on conflict do
 so re-pasting any of them is harmless if in doubt.
 
 No application code changed; `npm run build` passes unchanged.
+
+### 2026-09-21 — Session: 2026-09-21 stock snapshot; the warehouse now states ownership itself
+
+`sample/MCC. PRC. WM. CW Taytay Inventory. 2026 09 21.xlsx`. Fourth distinct shape in four
+snapshots, but this one changes something for the better: the warehouse has added a column
+that answers, per row, the question the last three imports had to infer.
+
+**Layout: MERGED again** (one `SOH` / `Incoming` / `Outgoing`, as on 09-02, not the split
+`CW *` sheets of 09-07), and the **`Item per location bin` sheet is back**, so locations are
+read rather than carried forward.
+
+**The new "Category" column, and why it now outranks everything else.** Each row carries
+`Central Warehouse Inventory` or `Safekeeping Inventory` — the warehouse saying outright who
+owns the material. It is measurably better than the Project Origin rule it replaces, which it
+contradicts on **68 rows**, and on inspection the column is right every time:
+
+| | disagreement with Project Origin |
+|---|---|
+| SOH | 1 row (warehouse-origin, classed safekeeping) |
+| Incoming | 53 projects transferring material INTO warehouse ownership (concrete rack, rockwool, concrete pedestals) + 1 |
+| Outgoing | 10 warehouse-origin rows that are safekeeping pull-outs + 3 the reverse |
+
+Those 53 are the same rows the 09-07 session had to identify by reading them one at a time.
+Ownership is now a **three-tier fallback**, documented at the partition: the column where it
+exists, else the sheet split, else Project Origin. Each earlier rule is wrong for the other
+shapes and wrong *silently* — a misfiled row still imports, it just lands in the wrong half of
+the business — so the report now prints which rule it used.
+
+**The trailing columns are read by VALUE now, not position, and that caught a real misread.**
+Columns 0–9 (stock) and 0–12 (movement) have never moved; everything past them has changed in
+every file. On 09-21 index 13 of the movement sheets went from `Remarks` to this new
+`Category`, and index 14 of SOH — which the importer read as remarks — holds the string
+**"do not edit"** from a legend block, which would have been imported as one line's remarks.
+So `findOwnershipCol` / `findMovingCol` locate those columns by the vocabulary in them and
+`findRemarksCol` by header name. Header names alone would not do for the ownership column:
+the movement sheets have **two** columns both titled "Category" (one Inventory/Fixed Asset,
+one this), and a name lookup takes whichever comes first.
+
+**Safekeeping movement now names the owning project, not the origin.** On a safekeeping row
+the project is *whose material it is*, which is the counterparty that is not the warehouse.
+Origin names it on all but the 10 outgoing pull-outs the warehouse itself executed, where the
+owner is the destination — filing those under a project called "Central Warehouse Taytay" is
+incoherent in a table defined as project-owned material HELD BY the warehouse. Rows naming the
+warehouse fell 12 → 2.
+
+**The 2 that remain are the source contradicting itself** and are left alone: one tarpaulin
+line (and its receipt) is warehouse-origin but the ownership column classes it safekeeping. One
+row is not mine to overrule; it will show as a one-line "project" on the Safekeeping tab.
+
+**Remarks are gone from the source entirely** — no sheet in this workbook carries them, so
+safekeeping SOH remarks are empty where they used to read "For safekeeping of materials".
+Source loss, not a regression.
+
+**Figures.** inventory **770** (was 827), safekeeping_soh **245** (was 189) — the shift is the
+ownership column reclassifying lines, not stock vanishing. ledger **333** (78 in / 255 out)
+spanning 185 days to **offset 0**, the snapshot date itself. Valuation **₱103,566,970** against
+₱104,523,359, −0.9%. Units on hand 480,496. **Unpriced lines 21, down from 50.** Locations
+**740 of 770 (96%)**, read from this workbook. `TODAY` → **2026-09-21**.
+
+**Incoming still reads 0, and this time the reason is precise rather than general.** It is a
+trailing-14-day in-transit slice; exactly **one** receipt falls inside that window (50 L of
+diesel, 12 days back) and its item code holds no stock on hand, so no line can carry it. Not a
+defect, and not the 09-07 situation of having no receipts at all.
+
+**Verified.** Generated-data suite, placement suite and the seed/schema NOT NULL cross-check
+all pass: invariants hold on all 770 lines (the source's own arithmetic was consistent on all
+1,015 stock rows), every recorded line sits at its recorded bay, 0 collisions, capacity never
+over positions, 1,172 constrained seed rows with zero violations. In the browser on the real
+data: Total Inventory 480,496 with 468,958 + 11,538 reconciling exactly, Reports ₱103,566,970
+over 770 SKUs, Analytics 185 ledger days with the newest movement today, Safekeeping 12
+projects / 268,663 SOH, the MEPFS panel reading "382 of 384 lines are at their recorded bin",
+and zero console errors. `npm run build` passes; `dist/` holds no item code, description,
+location or figure.
+
+**One assertion in the verify suite was retired, not silenced.** "No safekeeping row is
+warehouse-owned" was an invariant only while the partition WAS Project Origin. It is now a
+counted note plus a weaker check that every safekeeping row names some project.
+
+**Measurement note.** The browser pane was not compositing, so `innerText` returned "" on a
+fully rendered page — 329 elements and 6 KPI tiles were present. Read `textContent` (or count
+nodes) when `innerText` is empty; an empty `innerText` is not an empty page.
+
+**To put this live** (Supabase SQL Editor, in order): re-run `supabase/schema.sql`, then paste
+`supabase/seed/01..06_seed.sql`. **Six parts now** — the audit dataset pushed it past four. No
+migration: no column changed this snapshot.
+
+**Still open, five snapshots running:** no workbook since July has carried a price column, so
+valuations rest on prices carried forward from July.

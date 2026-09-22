@@ -107,26 +107,89 @@ const sheet = (name) => wb.rows(name)
 // ---------------------------------------------------------------------------
 const SPLIT = has('CW SOH')
 
-// SOH sheets: row 1 is "As of: <date>", row 2 the header, data from row 3.
-const sohRows = (name) =>
-  sheet(name).slice(2)
-    .filter((r) => clean(r[2]))
-    .map((r) => ({
-      origin: clean(r[1]), code: clean(r[2]), desc: clean(r[3]), desc2: clean(r[4]), uom: clean(r[5]),
-      boh: num(r[6]), qin: num(r[7]), qout: num(r[8]), soh: num(r[9]),
-      // The moving class sits in one of two trailing columns depending on the export;
-      // the later one is better populated, so prefer it and fall back.
-      remarks: clean(r[14]), moving: clean(r[21]) || clean(r[20]),
-    }))
+// ---------------------------------------------------------------------------
+// THE TRAILING COLUMNS MOVE; THE LEADING ONES DO NOT.
+//
+// Columns 0-9 of a stock sheet and 0-12 of a movement sheet have held the same
+// meaning in every snapshot so far, so those are read by position. Everything past
+// them has changed in all three files — 2026-09-02 had Class / Discounted Price /
+// Remarks, 2026-09-07 added a moving class in two different places, 2026-09-21
+// dropped Remarks entirely and put a new "Category" there. Reading those by position
+// does not just lose data, it reads the WRONG data: index 14 of the 09-21 SOH sheet
+// holds the string "do not edit" from a legend block, which would have been imported
+// as one line's remarks.
+//
+// So the volatile columns are found by their VALUES rather than their position or
+// their header. Header names would not be enough here: the 09-21 movement sheets have
+// TWO columns both called "Category" (one Inventory/Fixed Asset, one the ownership
+// class below), and a name lookup would take whichever came first.
+// ---------------------------------------------------------------------------
+const OWNERSHIP = { warehouse: /^central warehouse inventory$/i, safekeeping: /^safekeeping inventory$/i }
+const MOVING = /^(fast|slow|non)[\s-]?moving$/i
 
-const movementRows = (name) =>
-  sheet(name).slice(1)
-    .filter((r) => clean(r[1]))
-    .map((r) => ({
-      origin: clean(r[1]), dest: clean(r[2]), date: clean(r[3]), docRef: clean(r[4]),
-      category: clean(r[5]), code: clean(r[6]), desc: clean(r[7]), desc2: clean(r[8]),
-      uom: clean(r[9]), qty: num(r[10]), cls: clean(r[11]), cond: clean(r[12]), remarks: clean(r[13]),
-    }))
+/** Index of the column whose values are the warehouse/safekeeping ownership class, or -1. */
+function findOwnershipCol(rows) {
+  const width = rows.reduce((w, r) => Math.max(w, r.length), 0)
+  for (let c = 0; c < width; c++) {
+    let hits = 0, other = 0
+    for (const r of rows) {
+      const v = clean(r[c])
+      if (!v) continue
+      if (OWNERSHIP.warehouse.test(v) || OWNERSHIP.safekeeping.test(v)) hits++
+      else other++
+    }
+    // Demand that the column is ENTIRELY this vocabulary and covers most of the sheet,
+    // so a stray note that happens to say "Safekeeping Inventory" cannot win.
+    if (other === 0 && hits >= rows.length * 0.9) return c
+  }
+  return -1
+}
+
+/** Index of a column holding the fast/slow/non-moving class, or -1. */
+function findMovingCol(rows) {
+  const width = rows.reduce((w, r) => Math.max(w, r.length), 0)
+  let best = -1, bestHits = 0
+  for (let c = 0; c < width; c++) {
+    let hits = 0
+    for (const r of rows) if (MOVING.test(clean(r[c]))) hits++
+    if (hits > bestHits) { bestHits = hits; best = c }
+  }
+  return bestHits >= 10 ? best : -1
+}
+
+/** Index of a column headed "Remarks", or -1. Unambiguous by name, unlike Category. */
+const findRemarksCol = (header) =>
+  header.findIndex((h) => /^remarks$/i.test(clean(h)))
+
+// SOH sheets: row 1 is "As of: <date>", row 2 the header, data from row 3.
+const sohRows = (name) => {
+  const all = sheet(name)
+  const body = all.slice(2).filter((r) => clean(r[2]))
+  const own = findOwnershipCol(body)
+  const mov = findMovingCol(body)
+  const rem = findRemarksCol(all[1] ?? [])
+  return body.map((r) => ({
+    origin: clean(r[1]), code: clean(r[2]), desc: clean(r[3]), desc2: clean(r[4]), uom: clean(r[5]),
+    boh: num(r[6]), qin: num(r[7]), qout: num(r[8]), soh: num(r[9]),
+    owner: own >= 0 ? clean(r[own]) : '',
+    moving: mov >= 0 ? clean(r[mov]) : '',
+    remarks: rem >= 0 ? clean(r[rem]) : '',
+  }))
+}
+
+const movementRows = (name) => {
+  const all = sheet(name)
+  const body = all.slice(1).filter((r) => clean(r[1]))
+  const own = findOwnershipCol(body)
+  const rem = findRemarksCol(all[0] ?? [])
+  return body.map((r) => ({
+    origin: clean(r[1]), dest: clean(r[2]), date: clean(r[3]), docRef: clean(r[4]),
+    category: clean(r[5]), code: clean(r[6]), desc: clean(r[7]), desc2: clean(r[8]),
+    uom: clean(r[9]), qty: num(r[10]), cls: clean(r[11]), cond: clean(r[12]),
+    owner: own >= 0 ? clean(r[own]) : '',
+    remarks: rem >= 0 ? clean(r[rem]) : '',
+  }))
+}
 
 const SNAPSHOT_DATE = (() => {
   const v = cell(sheet(SPLIT ? 'CW SOH' : 'SOH')[0]?.[2])
@@ -134,8 +197,31 @@ const SNAPSHOT_DATE = (() => {
   throw new Error('the SOH sheet\'s C1 cell does not hold the snapshot date')
 })()
 
+// ---------------------------------------------------------------------------
+// WHO OWNS THE MATERIAL — three signals, in order of authority.
+//
+// 1. The OWNERSHIP COLUMN, new in 2026-09-21. The warehouse now states outright, per
+//    row, whether a line is its own stock or a project's held for safekeeping. Where
+//    it exists nothing else is consulted, because it is a statement rather than an
+//    inference — and it is measurably better than what it replaces: on 09-21 it
+//    disagrees with Project Origin on 68 rows, and every one checked was the column
+//    being right (53 incoming rows are projects transferring material INTO warehouse
+//    ownership — a concrete rack, rockwool — and 10 outgoing rows leaving the
+//    warehouse are safekeeping pull-outs).
+// 2. The SHEET, when the workbook splits CW * from Safekeeping * (July, 09-07).
+// 3. PROJECT ORIGIN, the only signal a merged workbook without the column has (09-02).
+//
+// Falling back rather than assuming matters because each rule is wrong for the other
+// shapes, and wrong silently: a misfiled row still imports, it just lands in the wrong
+// half of the business.
+// ---------------------------------------------------------------------------
+const ownedByWarehouse = (r) =>
+  r.owner ? OWNERSHIP.warehouse.test(r.owner) : r.origin === WAREHOUSE
+
 let warehouseRows, skStock, CW_IN, CW_OUT, SK_IN, SK_OUT
+let PARTITION
 if (SPLIT) {
+  PARTITION = 'sheet'
   warehouseRows = sohRows('CW SOH')
   skStock = sohRows('Safekeeping SOH')
   CW_IN = movementRows('CW Incoming')
@@ -144,14 +230,15 @@ if (SPLIT) {
   SK_OUT = movementRows('Safekeeping Outgoing')
 } else {
   const SOH = sohRows('SOH')
-  warehouseRows = SOH.filter((r) => r.origin === WAREHOUSE)
-  skStock = SOH.filter((r) => r.origin !== WAREHOUSE)
   const INCOMING = movementRows('Incoming')
   const OUTGOING = movementRows('Outgoing')
-  CW_IN = INCOMING.filter((r) => r.origin === WAREHOUSE)
-  CW_OUT = OUTGOING.filter((r) => r.origin === WAREHOUSE)
-  SK_IN = INCOMING.filter((r) => r.origin !== WAREHOUSE)
-  SK_OUT = OUTGOING.filter((r) => r.origin !== WAREHOUSE)
+  PARTITION = SOH.some((r) => r.owner) ? 'ownership column' : 'project origin'
+  warehouseRows = SOH.filter(ownedByWarehouse)
+  skStock = SOH.filter((r) => !ownedByWarehouse(r))
+  CW_IN = INCOMING.filter(ownedByWarehouse)
+  CW_OUT = OUTGOING.filter(ownedByWarehouse)
+  SK_IN = INCOMING.filter((r) => !ownedByWarehouse(r))
+  SK_OUT = OUTGOING.filter((r) => !ownedByWarehouse(r))
 }
 
 // ---------------------------------------------------------------------------
@@ -469,11 +556,19 @@ const SOH_ROWS = skStock.map((r, i) => {
   }
 })
 
+// On a safekeeping row the project is WHOSE MATERIAL IT IS, which is the counterparty
+// that is not the warehouse. Origin names it on all but a handful: 10 of the 09-21
+// outgoing rows are pull-outs the warehouse itself executed, where the owning project
+// is the destination. Taking origin blindly there would file those under a project
+// called "Central Warehouse Taytay", which is incoherent in a table defined as
+// project-owned material HELD BY the warehouse.
+const skParty = (r) => (r.origin && r.origin !== WAREHOUSE ? r.origin : r.dest || r.origin)
+
 const skLog = (rows) =>
   rows.map((r, i) => ({
     id: i + 1,
-    project: r.origin,
-    projectCode: projectCodeFor(r.origin),
+    project: skParty(r),
+    projectCode: projectCodeFor(skParty(r)),
     date: /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : '',
     docRef: r.docRef,
     category: r.category,
@@ -589,7 +684,9 @@ const val = inventory.reduce((a, r) => a + r.inventoryValue, 0)
 const prevVal = prevInventory.reduce((a, r) => a + (r.inventoryValue || 0), 0)
 const placed = inventory.filter((r) => r.location).length
 
-console.log(`\nSnapshot ${SNAPSHOT_DATE}  <-  ${basename(srcPath)}\n`)
+console.log(`\nSnapshot ${SNAPSHOT_DATE}  <-  ${basename(srcPath)}`)
+console.log(`  layout ${SPLIT ? 'SPLIT (CW * / Safekeeping * sheets)' : 'MERGED (one SOH / Incoming / Outgoing)'}` +
+  `, warehouse-vs-safekeeping decided by ${PARTITION.toUpperCase()}\n`)
 console.log(`  inventory            ${String(inventory.length).padStart(5)} lines   (was ${prevInventory.length})`)
 console.log(`  ledger               ${String(LEDGER.length).padStart(5)} rows    in ${LEDGER.filter((r) => r.dir === 'in').length} / out ${LEDGER.filter((r) => r.dir === 'out').length}, ` +
   `spanning ${Math.max(...LEDGER.map((r) => r.off))}..${Math.min(...LEDGER.map((r) => r.off))} days back`)

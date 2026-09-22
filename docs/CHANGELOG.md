@@ -3926,3 +3926,59 @@ band click-through going 265 records to 71 and back. `npm run build` passes.
 **To bring this live:** run `supabase/migrations/2026-09-21_audit_report.sql` in the
 Supabase SQL Editor, then paste `supabase/seed/01..06_seed.sql` in order. Until then the
 tab renders its own empty state naming the missing table rather than drawing zeroes.
+
+### 2026-09-22 — Session: schema.sql now actually brings an old database up to date
+
+**The failure.** Pasting the newly generated seed, part 04 died:
+
+```
+ERROR: 42703: column "designation" of relation "delivery_tracker" does not exist
+LINE 311: insert into public.delivery_tracker (no,category,item,project,batch,designation,...)
+```
+
+**The cause is not the audit work — it is a year-old hole in how the schema is applied.**
+`supabase/schema.sql` is built out of `create table if not exists`, and its own header
+has claimed "Idempotent: safe to re-run" since day one. Both halves of that are true and
+together they are misleading: re-running it cannot destroy anything, but it also cannot
+UPDATE anything. A table that already exists is skipped **entirely, columns and all**.
+So a database created before a migration added a column can re-run schema.sql, get a
+clean success, and still be missing the column. There is no error to notice.
+
+`delivery_tracker.designation` and `.description2` were added by
+`supabase/migrations/2026-09-10_delivery_tracker_line_detail.sql` and that file had never
+been run against the live project. The seed has carried both columns since 2026-09-10 and
+this is simply the first re-seed since.
+
+**Collateral damage worth naming:** the generated seed packs statements into ~400 KB
+files without regard to which table they belong to, so part 04 holds the tail of
+`delivery_tracker` AND the whole of `audit_ratings`. One missing column on the first
+table aborted the transaction and took the second with it — which is why the brand-new
+audit tables looked like the thing that had failed when they were bystanders.
+
+**The fix: make "re-run schema.sql" true.** `schema.sql` now ends with a CATCH-UP block
+replaying every column change any migration has ever made, idempotently and in order:
+
+| when | change |
+|---|---|
+| 2026-09-02 | `inventory.location`, `inventory.bin_count` |
+| 2026-09-07 | `ledger.item_code` → nullable |
+| 2026-09-10 | `delivery_tracker.designation`, `.description2` |
+
+(The 2026-09-21 audit tables need no entry — they are new `create table` statements, and
+`if not exists` handles a new table correctly. It is only *columns on an existing table*
+that the pattern silently skips.)
+
+Every statement is safe to repeat: `add column if not exists` is a no-op when the column
+is there, and `alter column ... drop not null` is a no-op when it is already nullable.
+
+**The rule this buys, now in CLAUDE.md:** whatever the schema error, re-run `schema.sql`
+— it is the whole schema now, not just the parts that happened to be created first. And
+adding a column from here on is **two edits to schema.sql**: the `create table` (for a
+brand-new database) and one line in CATCH-UP (for every database that already exists),
+plus the dated file in `supabase/migrations/` as the record of *why*.
+
+**Recovery for the run that failed:** re-run `supabase/schema.sql`, then re-paste seed
+parts 04, 05 and 06. Parts 01–03 completed and every insert is `on conflict do update`,
+so re-pasting any of them is harmless if in doubt.
+
+No application code changed; `npm run build` passes unchanged.

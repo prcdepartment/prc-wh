@@ -87,9 +87,21 @@ Each documents its own reading rules and prints a report — read the report, it
 bad workbook shows up. Only run the one whose source actually changed.
 
 After a STOCK import, update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`.
-Then run any pending file in `supabase/migrations/` and paste the seed parts into the
-Supabase SQL Editor **in order** (they are split only because the editor rejects a
-submission over ~1 MB).
+Then **re-run `supabase/schema.sql`** and paste the seed parts into the Supabase SQL
+Editor **in order** (they are split only because the editor rejects a submission over
+~1 MB).
+
+**Re-running `schema.sql` is the answer to every schema error, and it is the whole
+answer.** It ends with a CATCH-UP block replaying every column change any migration has
+ever made, idempotently — because `create table if not exists` skips an existing table
+*columns and all*, so before that block a database created a month ago could re-run
+schema.sql, report success, and still be missing a column. That is exactly what killed
+the 2026-09-21 seed run (`column "designation" of relation "delivery_tracker" does not
+exist`, taking `audit_ratings` down with it, since both live in part 04).
+
+So: **adding a column means TWO edits to `schema.sql`** — the `create table` (for a new
+database) and one line in the CATCH-UP block (for every database that already exists) —
+plus the dated file in `supabase/migrations/`, which stays as the record of *why*.
 
 Both importers are committed for the same reason: the July snapshot's importer was ad hoc
 and lost, and so was the first delivery-tracker one. Never read a workbook by hand — add

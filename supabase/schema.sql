@@ -508,3 +508,44 @@ end $$;
 -- The audit log must not be rewritable, even by an admin — an audit trail you
 -- can edit is not an audit trail. Insert + read only.
 drop policy if exists "audit_log_admin" on public.audit_log;
+
+
+-- ============================================================
+-- CATCH-UP: every column change a migration has ever made.
+--
+-- WHY THIS BLOCK EXISTS. Everything above is `create table if not exists`, which is
+-- idempotent in the sense that re-running it cannot destroy anything — but NOT in the
+-- sense that it brings an older database up to date. A table that already exists is
+-- skipped entirely, columns and all, so a database created before a migration added a
+-- column silently stays without it. Re-running schema.sql looked like it had worked.
+--
+-- That cost a seed run on 2026-09-21: the delivery_tracker columns added on 2026-09-10
+-- had never been applied to the live project, and part 04 of the seed died on
+-- `column "designation" of relation "delivery_tracker" does not exist` — taking the
+-- audit_ratings insert in the same file down with it.
+--
+-- So every migration's column change is replayed here, idempotently, in the order it
+-- was made. The rule this buys: **whatever the schema error, re-run schema.sql**. It is
+-- now genuinely the whole schema, not just the parts that happened to be created first.
+-- The files in supabase/migrations/ stay as the dated record of WHY each change was
+-- made; this block is only the WHAT, so a fresh paste of schema.sql always lands on the
+-- current shape.
+--
+-- Adding a column from here on means TWO edits: the create-table above (for a brand new
+-- database) and one line here (for every database that already exists).
+-- ============================================================
+
+-- 2026-09-02 — inventory: warehouse location and bin count from the floor plan.
+alter table public.inventory add column if not exists location text;
+alter table public.inventory add column if not exists bin_count int not null default 0;
+
+-- 2026-09-07 — ledger: item_code nullable. The warehouse books some project-to-warehouse
+-- transfers against a description with no item code at all (13 of 295 rows in the
+-- 2026-09-07 snapshot); recording the movement without a code is honest, dropping the
+-- row would understate receipts. `drop not null` on an already-nullable column is a
+-- no-op, so this is safe to re-run.
+alter table public.ledger alter column item_code drop not null;
+
+-- 2026-09-10 — delivery_tracker: the line-item detail the hierarchical workbook carries.
+alter table public.delivery_tracker add column if not exists designation text;
+alter table public.delivery_tracker add column if not exists description2 text;

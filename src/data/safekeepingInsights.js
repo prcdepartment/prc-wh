@@ -15,8 +15,13 @@ export const KPIS = (pool = soh) => ({
   totalSoh: sum(pool, 'soh'),
   distinctProjects: distinctCount(pool, 'project'),
   distinctItemGroups: distinctCount(pool, 'itemGroup'),
-  totalIn: sum(pool, 'in'),
-  totalOut: sum(pool, 'out'),
+  // null, NOT zero, when the source stopped carrying the column. The 2026-09-28
+  // workbook dropped BOH / In / Out from the SOH sheet entirely, and a confident "0
+  // units" there reads as "nothing moved in or out", which is a different and false
+  // claim from "the sheet no longer reports this". Every other absent figure in this
+  // app is null for the same reason — see NoData and analytics().
+  totalIn: pool.some((r) => r.in > 0) ? sum(pool, 'in') : null,
+  totalOut: pool.some((r) => r.out > 0) ? sum(pool, 'out') : null,
   movingLines: pool.filter((r) => r.in > 0 || r.out > 0).length,
 })
 

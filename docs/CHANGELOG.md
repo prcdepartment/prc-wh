@@ -4070,3 +4070,107 @@ migration: no column changed this snapshot.
 
 **Still open, five snapshots running:** no workbook since July has carried a price column, so
 valuations rest on prices carried forward from July.
+
+### 2026-09-28 — Session: 2026-09-28 snapshot; the ownership column is corrupt and is now gated
+
+`sample/MCC. PRC. WM. CW Taytay Inventory. 2026 09 28.xlsx`. Fifth shape in five snapshots.
+Two things went wrong in this one, and both were silent.
+
+**1. The sheets stopped agreeing with each other about column positions.** The workbook
+dropped its `Concatenate` column from SOH and Incoming but **kept it on Outgoing** — the
+first time two sheets in ONE file disagree about where Project Origin sits. It also dropped
+`BOH` / `In` / `Out` from SOH entirely. Reading by position there does not lose a column, it
+shifts every column by one and imports Item Code as the project name.
+
+**Every column is now found by its header**, not its position (`pick`). The one a name
+cannot resolve is the ownership class, because the movement sheets carry two columns both
+headed "Category"; that one is still found by its values. Where a column is simply absent
+`pick` returns -1 and the field comes back empty rather than reading its neighbour. The
+`As of:` date moved column too, so `SNAPSHOT_DATE` now scans the first row for a date
+instead of reading a fixed cell.
+
+**2. The ownership column — last week's best signal — is corrupt on all three sheets.**
+It is present, well-formed, and completely wrong:
+
+| sheet | what it says | what it should say |
+|---|---|---|
+| SOH | `Safekeeping Inventory` on **all 1,007** rows | 764 of them are warehouse-origin stock |
+| Incoming | 17 of 26 warehouse-to-warehouse rows marked safekeeping | those include the warehouse's own battery and paint purchases |
+| Outgoing | 307 rows marked warehouse with a project origin | 285 of them were marked `Safekeeping Inventory` last week |
+
+The Outgoing and Incoming flips were confirmed against the 09-21 workbook itself, matching
+rows on document reference + item code + quantity: **285 outgoing and 62 incoming rows
+changed class since last week**, including projects pulling out their own wooden doors,
+wallpaper and SPC flooring. Historical movement does not get reclassified; this is a
+fill-down.
+
+Left unchecked it would have emptied the inventory table — every one of the warehouse's 764
+lines filed as somebody else's material — and the import would have reported success.
+
+**Three gates now gate that column, each catching a different sheet, and each independently
+justifiable rather than a tuned threshold:**
+
+1. **A classification with one distinct value classifies nothing.** Catches SOH.
+2. **It must refine Project Origin, not reverse it.** On 09-21 it disagreed on 4% and was
+   right every time; >20% disagreement is a broken column. Catches Outgoing at 50%.
+3. **It cannot be wrong about rows that are warehouse material by construction** — warehouse
+   origin and either no destination or a warehouse destination. Catches Incoming, which
+   passed gate 2 at 6% because on an Incoming sheet a genuine warehouse receipt often *does*
+   have a project origin, so that threshold has to stay loose.
+
+On rejection the importer **falls back** (to the sheet split, then Project Origin) and prints
+the problems in a banner at the top of the report and again at the foot. It does not throw: a
+bad column should not stop an import that is otherwise fine, but it must be impossible to miss.
+
+**Regression-tested against every earlier workbook, which is the point of a gate.** 09-21
+still uses the OWNERSHIP COLUMN (770/245/333), 09-07 still uses the SHEET (827/189/295),
+09-02 still uses PROJECT ORIGIN (827/178/214) — all three reproduce their previous figures
+exactly, with no warnings. The gates fire only on the broken file.
+
+**Two dashboard tiles were reading a confident, false zero.** Safekeeping's *Incoming* and
+*Outgoing* KPIs sum the SOH sheet's In/Out columns — the ones this workbook dropped — so both
+read `0 units`, which asserts "nothing moved" rather than "the sheet stopped reporting it".
+`KPIS()` now returns **null** for those when the source carries no such column, and the card
+renders `— not reported` with a tooltip saying why. Same reasoning as `NoData` and
+`analytics()` everywhere else in this app: an absent figure is never a zero.
+
+**Not changed:** the Safekeeping Masterlist still shows its Incoming/Outgoing columns as a
+column of zeros. That table reproduces the source sheet, and a column of zeros in a data
+table reads as the sheet's own content in a way a headline zero does not — but it is worth
+revisiting if the columns stay gone.
+
+**A Unit Price column came back** after five snapshots without one — and is populated on
+**7 of 1,007 rows**. Present is not usable, so price is taken per row: the sheet's figure
+where it gives one, the carried-forward figure otherwise. The 7 are plausible (junction and
+utility boxes at ₱17–155). **Class, by contrast, is now filled on every row**, which beats
+carrying last month's forward — 0 lines end without one, against 7 last week.
+
+**No location sheet again**, so bin addresses are carried forward: 733 of 764 (96%).
+
+**Figures.** inventory **764** (was 770), safekeeping_soh **243** (was 245), ledger **299**
+(26 in / 273 out) spanning 190 days. Valuation **₱103,120,347** against ₱103,566,970, −0.4%.
+Units on hand 479,116. Unpriced 22. `TODAY` → **2026-09-28**. Where BOH/In/Out are absent the
+opening balance is taken as the closing one with no flows — the workbook reports no movement
+for the period, and inventing some would be worse than saying so. Nothing in the app reads
+those three columns; only `hydrate` maps them.
+
+**Verified.** Generated-data, placement and seed/NOT NULL suites all pass — invariants on all
+764 lines, every recorded line at its recorded bay, 0 collisions, 1,132 constrained seed rows
+with zero violations. In the browser: Total Inventory 479,116 with 467,721 + 11,395
+reconciling exactly, Reports ₱103,120,347 over 764 SKUs, Analytics 190 ledger days, the two
+safekeeping tiles reading `— not reported`, and no console errors. `npm run build` passes;
+`dist/` carries no item code, description, location or figure.
+
+**To put this live:** re-run `supabase/schema.sql`, then paste `supabase/seed/01..06_seed.sql`
+in order. No migration — no column changed.
+
+**Measurement note.** A burst of `ERR_NETWORK_CHANGED` left the dev server's lazy chunks
+half-fetched and the page rendered 17 elements with no JS error. A reload fixed it. An
+under-rendered page with no error in the console is a failed fetch, not a crash — reload
+before debugging.
+
+**Worth raising with the warehouse team, in priority order:** the ownership column is
+mis-filled on all three sheets of this file (they had it right on 09-21); the SOH sheet has
+lost BOH/In/Out; the location sheet is missing again; and the Unit Price column is back but
+empty on 99% of rows — which is still the five-snapshot-old question of where the
+authoritative price list lives.

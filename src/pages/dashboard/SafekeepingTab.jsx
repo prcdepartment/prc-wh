@@ -197,8 +197,15 @@ export default function SafekeepingTab({ pool, qtyUnit = 'units' }) {
         <div className="mt overview-stack">
           <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
             {SK_CARDS.map((c) => (
-              <KpiCard key={c.key} label={c.label} value={num(k[c.key])}
-                unit={c.qty ? qtyUnit : c.unit} icon={c.icon} color={S[c.role]} tooltip={c.tip} />
+              // A null figure is one the source does not report (see KPIS) — show a
+              // dash and say so, rather than a zero that claims nothing moved.
+              <KpiCard key={c.key} label={c.label}
+                value={k[c.key] == null ? '—' : num(k[c.key])}
+                unit={k[c.key] == null ? 'not reported' : c.qty ? qtyUnit : c.unit}
+                icon={c.icon} color={S[c.role]}
+                tooltip={k[c.key] == null
+                  ? `${c.tip} This workbook's SOH sheet no longer carries that column, so there is nothing to total.`
+                  : c.tip} />
             ))}
           </div>
 

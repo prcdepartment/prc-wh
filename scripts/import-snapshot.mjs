@@ -108,26 +108,41 @@ const sheet = (name) => wb.rows(name)
 const SPLIT = has('CW SOH')
 
 // ---------------------------------------------------------------------------
-// THE TRAILING COLUMNS MOVE; THE LEADING ONES DO NOT.
+// EVERY COLUMN IS FOUND BY ITS HEADER. NOTHING IS READ BY POSITION.
 //
-// Columns 0-9 of a stock sheet and 0-12 of a movement sheet have held the same
-// meaning in every snapshot so far, so those are read by position. Everything past
-// them has changed in all three files — 2026-09-02 had Class / Discounted Price /
-// Remarks, 2026-09-07 added a moving class in two different places, 2026-09-21
-// dropped Remarks entirely and put a new "Category" there. Reading those by position
-// does not just lose data, it reads the WRONG data: index 14 of the 09-21 SOH sheet
-// holds the string "do not edit" from a legend block, which would have been imported
-// as one line's remarks.
+// Position was safe for the leading columns until 2026-09-28, when the workbook
+// dropped its "Concatenate" column from SOH and Incoming but KEPT it on Outgoing —
+// so for the first time two sheets in ONE file disagree about where Project Origin
+// sits. Reading by position there does not lose a column, it shifts every column by
+// one and imports Item Code as the project. That is silent and total.
 //
-// So the volatile columns are found by their VALUES rather than their position or
-// their header. Header names would not be enough here: the 09-21 movement sheets have
-// TWO columns both called "Category" (one Inventory/Fixed Asset, one the ownership
-// class below), and a name lookup would take whichever came first.
+// The same file also dropped BOH / In / Out from SOH, so a stock sheet no longer even
+// has a fixed set of columns. Header lookup handles both: a column that is not there
+// simply is not found, and `pick` returns -1 rather than reading its neighbour.
+//
+// The one column a name cannot resolve is the ownership class, because the movement
+// sheets carry TWO columns both headed "Category" (one Inventory/Fixed Asset, one the
+// ownership class). That one is found by its VALUES — and then checked, see below.
 // ---------------------------------------------------------------------------
 const OWNERSHIP = { warehouse: /^central warehouse inventory$/i, safekeeping: /^safekeeping inventory$/i }
 const MOVING = /^(fast|slow|non)[\s-]?moving$/i
 
-/** Index of the column whose values are the warehouse/safekeeping ownership class, or -1. */
+// findOwnershipCol works on raw rows, so the usability check below needs to know which
+// column held Project Origin on that same sheet.
+const ORIGIN_COL = new WeakMap()
+const DEST_COL = new WeakMap()
+
+// Things wrong with the SOURCE, not with this script. Collected rather than thrown,
+// because a bad column should not stop an import that is otherwise fine — but it must
+// be impossible to miss, so the report prints them at the top and at the bottom.
+const WARNINGS = []
+const warn = (m) => { WARNINGS.push(m) }
+
+/** Index of the first column whose header matches, or -1. */
+const pick = (header, ...names) =>
+  header.findIndex((h) => names.some((n) => n instanceof RegExp ? n.test(clean(h)) : clean(h).toLowerCase() === n))
+
+/** Index of the column whose values are the ownership vocabulary, or -1. */
 function findOwnershipCol(rows) {
   const width = rows.reduce((w, r) => Math.max(w, r.length), 0)
   for (let c = 0; c < width; c++) {
@@ -138,11 +153,73 @@ function findOwnershipCol(rows) {
       if (OWNERSHIP.warehouse.test(v) || OWNERSHIP.safekeeping.test(v)) hits++
       else other++
     }
-    // Demand that the column is ENTIRELY this vocabulary and covers most of the sheet,
-    // so a stray note that happens to say "Safekeeping Inventory" cannot win.
     if (other === 0 && hits >= rows.length * 0.9) return c
   }
   return -1
+}
+
+/**
+ * Is the ownership column actually usable on this sheet?
+ *
+ * Added after 2026-09-28, where the column was present and well-formed and still
+ * completely wrong. On SOH it read "Safekeeping Inventory" on all 1,007 rows — a
+ * fill-down — which would have classified the warehouse's own 764 lines as somebody
+ * else's material and left the inventory table empty. On Outgoing, 285 rows that the
+ * 09-21 workbook had explicitly marked Safekeeping (matched on document reference,
+ * item code and quantity) came back marked Central Warehouse, including a project
+ * pulling out its OWN wooden doors and flooring.
+ *
+ * Two gates, both of which that file fails and every earlier file passes:
+ *   1. A classification with ONE distinct value classifies nothing.
+ *   2. The column is a REFINEMENT of Project Origin, not a replacement — on 09-21 it
+ *      disagreed with origin on 4% of rows and was right every time. Half the sheet
+ *      disagreeing is not a better classification, it is a broken column.
+ */
+const OWNERSHIP_MAX_DISAGREEMENT = 0.2
+function ownershipUsable(rows, col, label) {
+  if (col < 0) return false
+  const vals = new Set(rows.map((r) => clean(r[col]).toLowerCase()).filter(Boolean))
+  if (vals.size < 2) {
+    warn(`${label}: the ownership column holds only "${[...vals][0] ?? ''}" on every row — it classifies nothing, so it is ignored.`)
+    return false
+  }
+  let disagree = 0
+  for (const r of rows) {
+    const byCol = OWNERSHIP.warehouse.test(clean(r[col]))
+    const byOrigin = clean(r[ORIGIN_COL.get(rows)] ?? '') === WAREHOUSE
+    if (byCol !== byOrigin) disagree++
+  }
+  const share = disagree / rows.length
+  if (share > OWNERSHIP_MAX_DISAGREEMENT) {
+    warn(`${label}: the ownership column contradicts Project Origin on ${disagree} of ${rows.length} rows ` +
+      `(${Math.round(share * 100)}%). It is meant to refine that, not reverse it, so it is ignored.`)
+    return false
+  }
+
+  // Gate 3, and the one that catches a sheet the other two let through. Some rows are
+  // warehouse material BY CONSTRUCTION: the warehouse is the origin and either there is
+  // no destination (a stock line) or the destination is the warehouse too (it bought
+  // for itself). The column cannot be right about anything if it is wrong about those.
+  //
+  // This is what exposed the 09-28 Incoming sheet. It disagreed with Project Origin on
+  // only 6% of rows, under the gate above — because on Incoming a genuine warehouse
+  // receipt often DOES have a project origin, so broad disagreement is expected there
+  // and the threshold has to stay loose. But of its 26 unambiguous rows it called 17
+  // safekeeping, including the warehouse's own battery and paint purchases. Checked
+  // against the previous workbook afterwards: 62 rows had flipped class since 09-21.
+  const oc = ORIGIN_COL.get(rows)
+  const dc = DEST_COL.get(rows)
+  const unambiguous = rows.filter((r) =>
+    clean(r[oc] ?? '') === WAREHOUSE && (dc === undefined || dc < 0 || clean(r[dc] ?? '') === WAREHOUSE))
+  if (unambiguous.length >= 10) {
+    const agree = unambiguous.filter((r) => OWNERSHIP.warehouse.test(clean(r[col]))).length
+    if (agree / unambiguous.length < 0.8) {
+      warn(`${label}: of ${unambiguous.length} rows that are warehouse material by construction ` +
+        `(warehouse to warehouse), the ownership column calls only ${agree} warehouse. It is ignored.`)
+      return false
+    }
+  }
+  return true
 }
 
 /** Index of a column holding the fast/slow/non-moving class, or -1. */
@@ -157,44 +234,97 @@ function findMovingCol(rows) {
   return bestHits >= 10 ? best : -1
 }
 
-/** Index of a column headed "Remarks", or -1. Unambiguous by name, unlike Category. */
-const findRemarksCol = (header) =>
-  header.findIndex((h) => /^remarks$/i.test(clean(h)))
-
 // SOH sheets: row 1 is "As of: <date>", row 2 the header, data from row 3.
 const sohRows = (name) => {
   const all = sheet(name)
-  const body = all.slice(2).filter((r) => clean(r[2]))
-  const own = findOwnershipCol(body)
+  const head = all[1] ?? []
+  const c = {
+    origin: pick(head, 'project origin', 'project name'),
+    code: pick(head, 'item code'),
+    desc: pick(head, 'item description'),
+    desc2: pick(head, 'specific description', '2nd description'),
+    uom: pick(head, 'uom'),
+    boh: pick(head, 'boh'),
+    qin: pick(head, 'in'),
+    qout: pick(head, 'out'),
+    soh: pick(head, 'soh'),
+    price: pick(head, 'unit price'),
+    cls: pick(head, 'class'),
+    remarks: pick(head, 'remarks'),
+  }
+  if (c.code < 0 || c.soh < 0) throw new Error(`${name}: no "Item Code" / "SOH" header found`)
+  const body = all.slice(2).filter((r) => clean(r[c.code]))
+  ORIGIN_COL.set(body, c.origin)
+  DEST_COL.set(body, -1) // a stock sheet has no destination
+  const ownCol = findOwnershipCol(body)
+  const own = ownershipUsable(body, ownCol, name) ? ownCol : -1
   const mov = findMovingCol(body)
-  const rem = findRemarksCol(all[1] ?? [])
-  return body.map((r) => ({
-    origin: clean(r[1]), code: clean(r[2]), desc: clean(r[3]), desc2: clean(r[4]), uom: clean(r[5]),
-    boh: num(r[6]), qin: num(r[7]), qout: num(r[8]), soh: num(r[9]),
-    owner: own >= 0 ? clean(r[own]) : '',
-    moving: mov >= 0 ? clean(r[mov]) : '',
-    remarks: rem >= 0 ? clean(r[rem]) : '',
-  }))
+  const g = (r, i) => (i >= 0 ? clean(r[i]) : '')
+  const n = (r, i) => (i >= 0 ? num(r[i]) : 0)
+  return body.map((r) => {
+    const soh = n(r, c.soh)
+    // BOH / In / Out vanished from the 09-28 sheet. Where they are absent the opening
+    // balance is taken as the closing one with no flows: the workbook reports no
+    // movement for the period, and inventing some would be worse than saying so.
+    const hasFlows = c.boh >= 0 && c.qin >= 0 && c.qout >= 0
+    return {
+      origin: g(r, c.origin), code: g(r, c.code), desc: g(r, c.desc), desc2: g(r, c.desc2),
+      uom: g(r, c.uom), soh,
+      boh: hasFlows ? n(r, c.boh) : soh,
+      qin: hasFlows ? n(r, c.qin) : 0,
+      qout: hasFlows ? n(r, c.qout) : 0,
+      price: n(r, c.price),
+      cls: g(r, c.cls),
+      owner: own >= 0 ? g(r, own) : '',
+      moving: mov >= 0 ? clean(r[mov]) : '',
+      remarks: g(r, c.remarks),
+    }
+  })
 }
 
 const movementRows = (name) => {
   const all = sheet(name)
-  const body = all.slice(1).filter((r) => clean(r[1]))
-  const own = findOwnershipCol(body)
-  const rem = findRemarksCol(all[0] ?? [])
+  const head = all[0] ?? []
+  const c = {
+    origin: pick(head, 'project origin'),
+    dest: pick(head, 'project destination'),
+    date: pick(head, /^date/i),
+    docRef: pick(head, 'document reference'),
+    category: pick(head, 'category'),
+    code: pick(head, 'item code'),
+    desc: pick(head, 'item description'),
+    desc2: pick(head, '2nd description', 'specific description'),
+    uom: pick(head, 'uom'),
+    qty: pick(head, 'qty'),
+    cls: pick(head, 'class'),
+    cond: pick(head, 'condition'),
+    remarks: pick(head, 'remarks'),
+  }
+  if (c.origin < 0 || c.qty < 0) throw new Error(`${name}: no "Project Origin" / "Qty" header found`)
+  const body = all.slice(1).filter((r) => clean(r[c.origin]))
+  ORIGIN_COL.set(body, c.origin)
+  DEST_COL.set(body, c.dest)
+  const ownCol = findOwnershipCol(body)
+  const own = ownershipUsable(body, ownCol, name) ? ownCol : -1
+  const g = (r, i) => (i >= 0 ? clean(r[i]) : '')
   return body.map((r) => ({
-    origin: clean(r[1]), dest: clean(r[2]), date: clean(r[3]), docRef: clean(r[4]),
-    category: clean(r[5]), code: clean(r[6]), desc: clean(r[7]), desc2: clean(r[8]),
-    uom: clean(r[9]), qty: num(r[10]), cls: clean(r[11]), cond: clean(r[12]),
-    owner: own >= 0 ? clean(r[own]) : '',
-    remarks: rem >= 0 ? clean(r[rem]) : '',
+    origin: g(r, c.origin), dest: g(r, c.dest), date: g(r, c.date), docRef: g(r, c.docRef),
+    category: g(r, c.category), code: g(r, c.code), desc: g(r, c.desc), desc2: g(r, c.desc2),
+    uom: g(r, c.uom), qty: c.qty >= 0 ? num(r[c.qty]) : 0, cls: g(r, c.cls), cond: g(r, c.cond),
+    owner: own >= 0 ? g(r, own) : '',
+    remarks: g(r, c.remarks),
   }))
 }
 
+// The "As of:" date sits beside its own label, and that label changed column when the
+// 09-28 workbook dropped Concatenate. Scan the first row for a date rather than
+// reading a fixed cell.
 const SNAPSHOT_DATE = (() => {
-  const v = cell(sheet(SPLIT ? 'CW SOH' : 'SOH')[0]?.[2])
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v
-  throw new Error('the SOH sheet\'s C1 cell does not hold the snapshot date')
+  for (const c of sheet(SPLIT ? 'CW SOH' : 'SOH')[0] ?? []) {
+    const v = cell(c)
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v
+  }
+  throw new Error('the SOH sheet\'s first row carries no "As of:" date')
 })()
 
 // ---------------------------------------------------------------------------
@@ -471,7 +601,11 @@ const inventory = warehouseRows.map((r, i) => {
   else if (/non/i.test(r.moving)) lastMovementOffset = 180 + Math.floor(rnd() * 185)
   else lastMovementOffset = 120 + Math.floor(rnd() * 245)
 
-  const unitPrice = priceFor(r.code, r.desc2)
+  // The sheet's own price where it gives one, otherwise the carried-forward figure.
+  // A Unit Price column returned on 09-28 after five snapshots without one, but
+  // populated on only 7 of 1,007 rows — present is not the same as usable, so it is
+  // taken per row rather than trusted wholesale.
+  const unitPrice = r.price > 0 ? r.price : priceFor(r.code, r.desc2)
 
   // Location: this workbook's own sheet where it has one, otherwise the address the
   // previous snapshot recorded for the same line.
@@ -503,7 +637,9 @@ const inventory = warehouseRows.map((r, i) => {
     // The sheet's own Discounted Price column is zero on every row, so it carries no
     // information; the previous snapshot's 35% write-down convention is kept instead.
     discountedPrice: round2(unitPrice * 0.35),
-    conditionClass: classFor(r.code, r.desc2),
+    // Likewise the class: the 09-28 sheet fills it on every row, which beats carrying
+    // last month's forward, but earlier sheets leave it blank.
+    conditionClass: r.cls || classFor(r.code, r.desc2),
     availableQty,
     reservedQty,
     incomingQty,
@@ -684,6 +820,13 @@ const val = inventory.reduce((a, r) => a + r.inventoryValue, 0)
 const prevVal = prevInventory.reduce((a, r) => a + (r.inventoryValue || 0), 0)
 const placed = inventory.filter((r) => r.location).length
 
+if (WARNINGS.length) {
+  console.log('\n' + '!'.repeat(78))
+  console.log('PROBLEMS WITH THE WORKBOOK — read these before trusting the figures below:')
+  for (const w of WARNINGS) console.log('  * ' + w)
+  console.log('!'.repeat(78))
+}
+
 console.log(`\nSnapshot ${SNAPSHOT_DATE}  <-  ${basename(srcPath)}`)
 console.log(`  layout ${SPLIT ? 'SPLIT (CW * / Safekeeping * sheets)' : 'MERGED (one SOH / Incoming / Outgoing)'}` +
   `, warehouse-vs-safekeeping decided by ${PARTITION.toUpperCase()}\n`)
@@ -710,4 +853,8 @@ console.log(`\n  lines per recorded area: ${[...byArea].sort((a, b) => b[1] - a[
 
 const unmatchedProjects = [...new Set(SOH_ROWS.filter((r) => !r.projectCode).map((r) => r.project))]
 if (unmatchedProjects.length) console.log(`\n  project names with no code in the master: ${unmatchedProjects.join(', ')}`)
+if (WARNINGS.length) {
+  console.log(`\n  ${WARNINGS.length} problem(s) with the SOURCE workbook are listed at the top of this report.`)
+  console.log('  Worth raising with the warehouse team — the import fell back and carried on.')
+}
 console.log(`\nNext: npm run seed\n`)

@@ -2329,9 +2329,16 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 
 /* ===========================================================================
    AUDIT TAB (Dashboard -> Audit)
-   The Project Warehouse Audit dashboard: its own filter bar, a weighted
-   scorecard, and tables that hold whole paragraphs of the auditor's prose
-   rather than the short codes the stock tables carry.
+
+   The Project Warehouse Audit dashboard. Its layout rule, and the reason this
+   block does not look like the rest of the dashboard's: NOTHING HERE IS A GRID
+   OF EQUAL TILES. Six identically weighted KPI boxes over an audit programme
+   say every number matters the same amount, which is never true — the rating is
+   the answer and the rest is why. So each view opens with one HEADLINE PANEL
+   (.au-hero) that gives the rating a ring and a verdict, the detail that
+   explains it the column beside, and the supporting figures a hairline-separated
+   strip underneath; everything below it is an asymmetric pair (.au-split) or a
+   full-width table, never another 50/50.
    =========================================================================== */
 
 /* The Audit tab has no material search bar (an item-code token cannot narrow an
@@ -2341,9 +2348,9 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 .dash-toolbar-spacer { flex: 1 1 auto; min-width: 0; }
 
 /* ---- filter bar ---- */
-/* Sits between the sub-tabs and the first card, on one line at desktop width. It is
-   deliberately NOT styled as a card: it is chrome for everything below it, and a
-   bordered panel here would read as the first of the cards it filters. */
+/* Sits between the sub-tabs and the headline panel. Deliberately NOT a card: it is
+   chrome for everything below it, and a bordered panel here would read as the first
+   of the cards it filters. */
 .audit-filters {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
   margin-top: 12px; padding: 9px 12px;
@@ -2356,46 +2363,211 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 }
 .audit-filters > .field.lookup { flex: 0 1 auto; margin: 0; }
 
-/* ---- criteria switcher on the Findings view ---- */
-.audit-crit-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
-.audit-crit-note { font-size: 12px; min-width: 0; }
+/* ---------------------------------------------------------------- headline panel */
+/* One surface, three regions: the verdict (left), the detail behind it (right), and
+   the supporting figures (full-width strip at the foot). The regions are divided by
+   hairlines rather than by being separate cards, which is the whole point — it has to
+   read as one instrument, not four objects that happen to be adjacent.
 
-/* Two-up card rows align to the top: the scorecard and the month chart are different
-   natural heights and stretching the shorter one leaves a band of dead card. */
-.audit-grid { align-items: start; }
-
-/* ---- weighted scorecard ---- */
-/* Five rows plus a total, on one grid so the number columns line up down the card:
-   [no] [icon] [name + note + bar] [weight] [rating]. The two figure columns are
-   fixed-width and tabular — they are read as a column, not as sentence-final words. */
-.scorecard { display: flex; flex-direction: column; gap: 2px; }
-.sc-row {
-  display: grid; grid-template-columns: 20px 22px minmax(0, 1fr) 54px 54px;
-  align-items: center; gap: 10px; padding: 9px 4px;
-  border-bottom: 1px solid var(--border);
+   The gradient is a WASH, not a decoration: it lifts the top-left corner where the
+   ring and the verdict sit, so the eye starts there rather than anywhere. Both stops
+   are brand-neutral surface tokens, so it survives the dark theme without a second
+   rule. */
+.au-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  margin-top: 12px;
+  background:
+    linear-gradient(135deg, var(--surface-2) 0%, var(--surface) 46%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
 }
-.sc-row:last-child { border-bottom: 0; }
-.sc-no { font-size: 11px; font-weight: 800; color: var(--text-faint); text-align: center; }
-.sc-icon { display: grid; place-items: center; }
+/* A single brand hairline along the top edge. One red line on the page's first
+   element is enough to place the whole tab; repeating it on every card below would
+   be noise. */
+.au-hero::before {
+  content: ''; grid-column: 1 / -1; height: 3px;
+  background: linear-gradient(90deg, var(--brand-red), var(--brand-red-dark) 55%, transparent);
+}
+
+.au-hero-focus {
+  display: flex; align-items: center; gap: 22px;
+  padding: 22px 24px 24px;
+  min-width: 0;
+}
+.au-hero-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 22px 24px 24px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+.au-hero-strip {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.au-eyebrow {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.au-hero-say { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* The verdict is the largest type on the page after the ring itself, and it is a
+   WORD rather than a number — "Needs Attention" is the sentence an executive repeats,
+   and 83% is the evidence for it. */
+.au-hero-title {
+  margin: 0; font-size: 25px; font-weight: 800; line-height: 1.15;
+  letter-spacing: -0.015em; color: var(--text);
+}
+.au-hero-note {
+  margin: 2px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--text-muted);
+  max-width: 48ch;
+}
+.au-hero-note b { color: var(--text); font-weight: 700; }
+.au-hero-foot { font-size: 11px; color: var(--text-faint); line-height: 1.45; }
+
+/* ---- the ring ---- */
+.au-gauge { position: relative; flex-shrink: 0; display: grid; place-items: center; }
+.au-gauge svg { position: absolute; inset: 0; }
+.au-gauge-face {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+/* Tabular figures at this size matter: the ring redraws on every filter change and a
+   proportional 1 would make the number jump sideways as it animates between values. */
+.au-gauge-value { font-size: 36px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; }
+.au-gauge-value i { font-size: 17px; font-style: normal; font-weight: 700; margin-left: 1px; }
+.au-gauge-caption {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); text-align: center; max-width: 94px; line-height: 1.3;
+}
+
+/* ---- movement chip ---- */
+/* "pts" is load-bearing: 88.4 to 89.5 is up 1.1 POINTS and up 1.3 PER CENT, and only
+   the first is what the chart shows. */
+.au-delta {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
+  font-size: 12px; font-weight: 800; margin-top: 1px;
+}
+.au-delta em { font-style: normal; font-weight: 600; color: var(--text-faint); margin-left: 2px; }
+
+/* ---- supporting figures ---- */
+/* No borders, no radius, no shadow — four readings of one programme, divided by a
+   hairline and nothing else. The first cell has no left rule so the strip starts
+   flush with the panel above it. */
+.au-stat {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 14px 22px; border-left: 1px solid var(--border); min-width: 0;
+}
+.au-stat:first-child { border-left: 0; }
+.au-stat-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.au-stat-value { font-size: 23px; font-weight: 800; line-height: 1.1; letter-spacing: -0.015em; color: var(--text); }
+/* --text-muted, not --text-faint: the strip sits on --surface-2 and faint is tuned
+   for --surface, where it measures 4.31:1 at 11px — under the 4.5 small-text line.
+   The same swap is already made elsewhere in this file for the same reason. */
+.au-stat-meta { font-size: 11px; color: var(--text-muted); line-height: 1.35; }
+
+/* ---------------------------------------------------------------- ranked list */
+/* The magnitude is a tint BEHIND the row, not a bar beside it. A bar in its own
+   column costs the width the project names need and reads as a second chart; behind
+   the row it costs nothing and still answers "by how much". */
+.au-rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* Capped where the list would otherwise set the height of its whole row. The right
+   padding is for the scrollbar: without it the rows' rounded corners sit under it. */
+.au-rank-scroll { max-height: 336px; overflow-y: auto; padding-right: 4px; }
+.au-rank-row {
+  position: relative; width: 100%; display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid transparent; border-radius: 8px;
+  background: none; font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.au-rank-row.static { cursor: default; }
+.au-rank-row:not(.static):hover { border-color: var(--border-strong); }
+.au-rank-row.on { border-color: var(--brand-red); }
+.au-rank-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px;
+  opacity: 0.14; pointer-events: none;
+}
+:root[data-theme='dark'] .au-rank-fill { opacity: 0.22; }
+.au-rank-no {
+  position: relative; font-size: 11px; font-weight: 800; color: var(--text-faint);
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.au-rank-name {
+  position: relative; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+.au-rank-name em {
+  font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.au-rank-value { position: relative; font-size: 14px; font-weight: 800; }
+
+/* ---------------------------------------------------------------- asymmetric pair */
+/* 7:5, not 1:1. Two equal halves give the eye no reason to read one before the other;
+   the wider card is the one carrying the chart people came for. */
+.au-split {
+  display: grid; gap: 12px; align-items: start;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+}
+.au-split.wide-right { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+
+/* ---- the chip that carries a card's own headline figure into its header ---- */
+.au-headline-chip {
+  display: inline-flex; align-items: baseline; gap: 6px; flex-shrink: 0;
+  padding: 5px 11px; border-radius: 20px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.au-headline-chip b { font-size: 15px; font-weight: 800; color: var(--text); }
+.au-headline-chip em {
+  font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+
+/* ---- an inline three-value split, in a card header instead of in a card ---- */
+.au-inline-split { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.au-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap;
+}
+.au-chip i { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.au-chip b { color: var(--text); font-weight: 800; }
+
+/* ---------------------------------------------------------------- scorecard */
+/* Five criteria as meters. A criterion is scored out of its OWN weight, so 11 of 15
+   and 15 of 20 are the same performance and two different numbers: the meter carries
+   the performance, the figures stay because they are what gets quoted in the meeting.
+   There is no TOTAL row any more — the ring beside it IS the total, and printing the
+   same number twice in one panel only invites the reader to check whether they match. */
+.scorecard { display: flex; flex-direction: column; gap: 1px; }
+.sc-row {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start; gap: 10px; padding: 7px 0;
+}
+.sc-icon { display: grid; place-items: center; padding-top: 1px; }
 .sc-body { min-width: 0; }
-.sc-name { font-size: 13px; font-weight: 700; color: var(--text); }
-.sc-note { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
-/* The bar is the criterion's rating as a share of its OWN weight, which is the only
-   way the five rows compare: 11 out of 15 and 15 out of 20 are the same performance
-   and different numbers. */
-.sc-bar { height: 5px; border-radius: 3px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+.sc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.sc-name {
+  font-size: 12.5px; font-weight: 700; color: var(--text); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sc-figure { font-size: 13px; font-weight: 800; flex-shrink: 0; }
+.sc-figure i { font-style: normal; font-size: 11px; font-weight: 700; color: var(--text-faint); }
+.sc-bar { height: 6px; border-radius: 3px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
 :root[data-theme='dark'] .sc-bar { background: var(--border); }
 .sc-bar-fill { display: block; height: 100%; border-radius: 3px; }
-.sc-weight { font-size: 12px; font-weight: 700; color: var(--text-muted); text-align: right; }
-.sc-rating { font-size: 14px; font-weight: 800; text-align: right; }
-.sc-total { margin-top: 4px; border-top: 1.5px solid var(--border-strong); border-bottom: 0; padding-top: 11px; }
-.sc-total .sc-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
-.sc-total .sc-rating { color: var(--text); font-size: 16px; }
 
-/* ---- audit tables ---- */
+/* ---------------------------------------------------------------- audit tables */
 /* The shared table.data sets white-space: nowrap, which is right for item codes and
-   wrong for a three-sentence action plan. These cells wrap and cap their line count
-   instead, so a row stays one screen-height's worth of reading. */
+   wrong for a three-sentence action plan. These cells wrap instead, so a row stays
+   one screen-height's worth of reading. */
 .au-wrap { white-space: normal; line-height: 1.45; display: flex; flex-direction: column; gap: 2px; }
 table.data td .au-wrap { max-width: 460px; }
 .au-strong { font-weight: 700; color: var(--text); }
@@ -2405,10 +2577,6 @@ table.data td .au-wrap { max-width: 460px; }
 .au-pos { color: var(--ok); font-weight: 700; }
 .au-wrap .badge { align-self: flex-start; }
 
-/* A four-tile KPI row, for the Record Accuracy view. The six-tile default row is the
-   shared .kpi-grid; this is the same tiles at four columns. */
-.kpi-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-
 /* An inline text button inside a card footer — used by the aging chart's "show all"
    escape hatch, where a real .btn would outweigh the sentence around it. */
 .link-btn {
@@ -2417,14 +2585,37 @@ table.data td .au-wrap { max-width: 460px; }
 }
 .link-btn:hover { color: var(--brand-red-dark, var(--brand-red)); }
 
+/* ---------------------------------------------------------------- responsive */
+@media (max-width: 1240px) {
+  /* The strip is the first thing to break: four 23px figures need ~170px each and
+     below this width they start hyphenating their own labels. */
+  .au-hero-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .au-stat:nth-child(3) { border-left: 0; }
+  .au-stat:nth-child(n + 3) { border-top: 1px solid var(--border); }
+}
 @media (max-width: 1100px) {
-  .kpi-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .audit-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The panel stacks under the verdict rather than squeezing beside it, and loses its
+     left rule for a top one so the division still reads in the new direction. */
+  .au-hero { grid-template-columns: minmax(0, 1fr); }
+  .au-hero-panel { border-left: 0; border-top: 1px solid var(--border); }
+  .au-split, .au-split.wide-right { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
+  /* The ring moves above the verdict: side by side at 375px it leaves the sentence a
+     140px column, which wraps every two words. */
+  .au-hero-focus { flex-direction: column; align-items: flex-start; gap: 16px; padding: 18px; }
+  .au-hero-panel { padding: 18px; }
+  .au-hero-note { max-width: none; }
+  .au-stat { padding: 12px 16px; }
+  .au-hero-title { font-size: 21px; }
   /* Each select takes a full row rather than compressing to a width where the
      placeholder ("All Project Types") no longer fits. */
   .audit-filters { flex-direction: column; align-items: stretch; }
   .audit-filters > .field.lookup { width: 100%; }
   table.data td .au-wrap, .au-item { max-width: 240px; }
+}
+@media (max-width: 520px) {
+  .au-hero-strip { grid-template-columns: minmax(0, 1fr); }
+  .au-stat { border-left: 0; }
+  .au-stat + .au-stat { border-top: 1px solid var(--border); }
 }

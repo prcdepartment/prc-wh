@@ -4,14 +4,16 @@ import {
   selectAudit, scorecard, ratingsByMonth, highRiskAreas, rootCauseTable, summaryKpis,
   accuracyByMonth, varianceByMonth, itemVariance, findingsByMonth, agingBands,
   auditAsOf, findingAge, isDefect, isOpen, typeOfAudit,
+  ratingGrade, seriesTrend, projectStandings, exposureLeaders, oldestOpenDays,
+  auditWindow, criteriaBreakdown,
   AUDIT_PROJECTS, AUDIT_MONTHS, AUDIT_YEARS, AUDIT_RATINGS, UNCLASSIFIED,
 } from '../../data/audit'
 import { CRITERIA_META, FINDING_CRITERIA } from '../../data/auditCriteria'
-import { Card, KpiCard, Segmented, NoData, DataTable, Badge } from '../../components/ui'
+import { Card, NoData, DataTable, Badge } from '../../components/ui'
 import Select from '../../components/Select'
 import {
   RatingsByMonthChart, HighRiskChart, AccuracyChart, VarianceByMonthChart,
-  FindingsStatusChart, AgingChart, RootCauseSplitChart,
+  FindingsStatusChart, AgingChart, RatingGauge,
 } from '../../components/AuditCharts'
 import { num, peso, compact, fmtDate } from '../../lib/format'
 import { seriesFor } from '../../lib/colors'
@@ -22,6 +24,14 @@ import Icon from '../../lib/icons'
 // ("MCC. PRC. WM. Project Warehouse Audit Report. 2026.pbix"), in its own order. Its
 // hidden fourth page is the audit CALENDAR, drawn from sheets this app does not load —
 // that is a scheduling view, not an audit result, and is left out on purpose.
+//
+// EACH VIEW OPENS WITH ONE HEADLINE PANEL, not a row of equal tiles. Six identically
+// weighted boxes say every number matters the same amount, which in an audit programme
+// is never true: the rating is the answer, the rest is why. So the panel gives the
+// rating a ring and a verdict, the detail that explains it the column beside, and the
+// supporting figures a strip underneath where they read as support rather than as
+// rivals. Everything below the panel is then an asymmetric pair or a full-width table —
+// never another 50/50 split, because a page of equal halves has no reading order.
 const VIEWS = [
   { key: 'summary', label: 'Summary', icon: 'grade' },
   { key: 'accuracy', label: 'Record Accuracy', icon: 'inventory' },
@@ -31,6 +41,10 @@ const VIEWS = [
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const pct0 = (v) => `${Math.round((v || 0) * 100)}%`
 const pct1 = (v) => `${((v || 0) * 100).toFixed(1)}%`
+
+// The two boundaries that change the verdict, notched onto every rating ring so the
+// number is read against the scale. See RATING_BANDS in data/audit.js.
+const GRADE_MARKS = [0.75, 0.85]
 
 /* ------------------------------------------------------------------ filter bar --- */
 // The Audit tab does NOT use the dashboard's shared FilterSearch: that bar's tokens are
@@ -84,11 +98,91 @@ function toSelection(f) {
   return { sel, monthNum }
 }
 
+/* ------------------------------------------------------------- panel primitives --- */
+
+/**
+ * One supporting figure in a headline panel's bottom strip.
+ *
+ * Deliberately NOT a card. The strip's figures are read as a set — four readings of the
+ * same programme — and giving each its own border, shadow and padding would make four
+ * objects out of one instrument panel. They are separated by a hairline and nothing
+ * else, which is what keeps the panel reading as a single surface.
+ */
+function Stat({ label, value, meta, tone }) {
+  return (
+    <div className="au-stat">
+      <span className="au-stat-label">{label}</span>
+      <span className="au-stat-value tabular" style={tone ? { color: tone } : undefined}>{value}</span>
+      {meta && <span className="au-stat-meta">{meta}</span>}
+    </div>
+  )
+}
+
+/**
+ * Period-on-period movement, in PERCENTAGE POINTS.
+ *
+ * "Up 1.1 points" and "up 1.3%" are different claims and only the first one is true of
+ * a move from 88.4 to 89.5; the chip says `pts` so it cannot be read as the other.
+ * Direction colour is semantic, not decorative — and `invert` exists because on a
+ * findings count, up is the bad direction.
+ */
+function Delta({ trend, invert = false, unit = 'pts' }) {
+  const { theme } = useTheme()
+  const S = seriesFor(theme)
+  if (!trend || trend.points === null) return null
+  const good = invert ? trend.direction === 'down' : trend.direction === 'up'
+  const color = trend.direction === 'flat' ? S.neutral : good ? S.available : S.total
+  const arrow = trend.direction === 'flat' ? 'minus' : trend.direction === 'up' ? 'arrowUp' : 'arrowDown'
+  return (
+    <span className="au-delta" style={{ color }}>
+      <Icon name={arrow} size={13} />
+      {Math.abs(trend.points)} {unit}
+      <em>vs {trend.previous.label} {trend.previous.year}</em>
+    </span>
+  )
+}
+
+/**
+ * A ranked list with the magnitude drawn behind the row rather than beside it.
+ *
+ * A bar in its own column costs the width the names need and reads as a second chart;
+ * as a tinted track behind the row it costs nothing and still answers "by how much".
+ * Rows are clickable where `onPick` is given, which is how the project standings
+ * double as a filter.
+ */
+function RankList({ rows, max, onPick, active, scroll = false }) {
+  const top = max || Math.max(1, ...rows.map((r) => r.weight))
+  if (!rows.length) return null
+  return (
+    // `scroll` caps the list where it would otherwise set the height of the whole row:
+    // 24 projects beside a five-bar chart leaves the chart's card ending halfway up a
+    // list that keeps going. Capped and scrolled, the pair reads as a pair — and every
+    // project stays reachable, which matters because finding yours is the point.
+    <ol className={`au-rank ${scroll ? 'au-rank-scroll' : ''}`}>
+      {rows.map((r, i) => (
+        <li key={r.key}>
+          <button type="button" className={`au-rank-row ${active === r.key ? 'on' : ''} ${onPick ? '' : 'static'}`}
+            onClick={onPick ? () => onPick(r) : undefined} disabled={!onPick}>
+            <span className="au-rank-fill" style={{ width: `${Math.max(2, (r.weight / top) * 100)}%`, background: r.color }} />
+            <span className="au-rank-no">{i + 1}</span>
+            <span className="au-rank-name">
+              {r.name}
+              {r.meta && <em>{r.meta}</em>}
+            </span>
+            <span className="au-rank-value tabular" style={{ color: r.color }}>{r.value}</span>
+          </button>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 /* -------------------------------------------------------------------- scorecard --- */
-// The report renders this as a plain four-column table. The bar is the addition: a
-// criterion's rating is a score out of its OWN weight, so "11% of 15%" and "15% of 20%"
-// are not comparable as numbers but are immediately comparable as a filled bar. The
-// number kept alongside is the one people quote in the meeting.
+// The report renders this as a plain four-column table of two percentages. The meter is
+// the addition, and it is what makes the five rows comparable at all: a criterion is
+// scored out of its OWN weight, so 11 of 15 and 15 of 20 are the same performance and
+// two different numbers. The meter shows the performance; the numbers beside it stay
+// because they are what people quote in the meeting.
 function Scorecard({ card }) {
   const { theme } = useTheme()
   const S = seriesFor(theme)
@@ -102,33 +196,27 @@ function Scorecard({ card }) {
         const meta = CRITERIA_META[r.criteria] || {}
         return (
           <div className="sc-row" key={r.criteria}>
-            <span className="sc-no">{r.num}</span>
-            <span className="sc-icon" style={{ color }}><Icon name={meta.icon || 'check'} size={16} /></span>
+            <span className="sc-icon" style={{ color }}><Icon name={meta.icon || 'check'} size={15} /></span>
             <div className="sc-body">
-              <div className="sc-name">{r.criteria}</div>
-              <div className="sc-note">{meta.note}</div>
+              <div className="sc-head">
+                <span className="sc-name">{r.criteria}</span>
+                <span className="sc-figure tabular">
+                  <b style={{ color }}>{pct0(r.rating)}</b><i>/{pct0(r.weight)}</i>
+                </span>
+              </div>
               <div className="sc-bar" title={`${pct1(r.rating)} earned of a ${pct0(r.weight)} weight`}>
                 <span className="sc-bar-fill" style={{ width: `${Math.min(100, share * 100)}%`, background: color }} />
               </div>
             </div>
-            <span className="sc-weight tabular">{pct0(r.weight)}</span>
-            <span className="sc-rating tabular" style={{ color }}>{pct0(r.rating)}</span>
           </div>
         )
       })}
-      <div className="sc-row sc-total">
-        <span className="sc-no" />
-        <span className="sc-icon" />
-        <div className="sc-body"><div className="sc-name">Total</div></div>
-        <span className="sc-weight tabular">{pct0(card.weight)}</span>
-        <span className="sc-rating tabular">{pct0(card.rating)}</span>
-      </div>
     </div>
   )
 }
 
 /* --------------------------------------------------------------- table columns --- */
-// `wrap` is the audit tables' own column flag: findings, root causes and action plans
+// `au-wrap` is the audit tables' own column flag: findings, root causes and action plans
 // are whole paragraphs of the auditor's prose, and the shared table's nowrap default
 // would push them off the right edge of the page.
 const ROOT_CAUSE_COLUMNS = [
@@ -192,13 +280,37 @@ export default function AuditTab() {
   const accuracy = useMemo(() => accuracyByMonth(data.counts), [data.counts])
   const variance = useMemo(() => varianceByMonth(data.counts), [data.counts])
   const items = useMemo(() => itemVariance(data.counts), [data.counts])
+  const standings = useMemo(() => projectStandings(data.ratings), [data.ratings])
 
-  // Findings page: narrowed to one inspection criterion, the way the report's four
-  // buttons do it. Record Accuracy is not among them — it has a whole page of its own.
+  const asOf = auditAsOf()
+  const grade = ratingGrade(kpis.rating)
+  const gradeColor = { critical: S.outgoing, watch: S.damaged, good: S.available, strong: S.available }[grade.key]
+  const ratingTrend = useMemo(() => seriesTrend(months), [months])
+  const accuracyTrend = useMemo(() => seriesTrend(accuracy, 'accuracy'), [accuracy])
+  // Best and worst month by accuracy — the spread the headline percentage hides. A
+  // programme averaging 86% made of 56% and 100% is a different problem from one made
+  // of 84% and 88%, and only the spread says which.
+  const accuracyRange = useMemo(() => {
+    if (!accuracy.length) return null
+    const sorted = [...accuracy].sort((a, b) => a.accuracy - b.accuracy)
+    return { worst: sorted[0], best: sorted[sorted.length - 1] }
+  }, [accuracy])
+  const itemsWithVariance = useMemo(() => items.filter((r) => r.variance !== 0).length, [items])
+  const span = useMemo(() => auditWindow(data.ratings), [data.ratings])
+
+  // Findings view: one inspection criterion at a time, the way the report's four
+  // buttons do it — but chosen from the breakdown panel, which shows all four states
+  // at once instead of hiding three behind a control.
+  // Ordered by open count, NOT by the form's own criteria order: the panel is numbered,
+  // and numbering four rows 1–4 while they read 96, 6, 30, 69 looks like a bug.
+  const breakdown = useMemo(
+    () => criteriaBreakdown(data.findings, FINDING_CRITERIA).sort((a, b) => b.open - a.open),
+    [data.findings])
   const critFindings = useMemo(() => data.findings.filter((x) => x.criteria === criteria), [data.findings, criteria])
   const critMonths = useMemo(() => findingsByMonth(critFindings), [critFindings])
-  const asOf = auditAsOf()
   const bands = useMemo(() => agingBands(critFindings, asOf), [critFindings, asOf])
+  const critRow = breakdown.find((b) => b.criteria === criteria) || { open: 0, closed: 0, raised: 0, closureRate: 0 }
+
   const themeSplit = useMemo(() => {
     const open = data.findings.filter((x) => isDefect(x) && isOpen(x))
     return ['People', 'Process', 'Tools'].map((name) => ({
@@ -232,6 +344,8 @@ export default function AuditTab() {
 
   const scope = [f.project || 'all projects', f.type && f.type.toLowerCase(), f.month, f.year]
     .filter(Boolean).join(' · ')
+  const weakest = standings[standings.length - 1]
+  const strongest = standings[0]
 
   const FINDING_DETAIL_COLUMNS = [
     { key: 'date', label: 'Audited', width: 108, render: (r) => fmtDate(r.date) },
@@ -266,43 +380,58 @@ export default function AuditTab() {
       {/* ------------------------------------------------------------- Summary */}
       {view === 'summary' && (
         <div className="mt overview-stack">
-          <div className="kpi-grid">
-            <KpiCard label="Audits Conducted" value={num(kpis.audits)} unit={`${kpis.projects} projects`}
-              icon="doc" color={S.neutral}
-              tooltip="An audit is one project inspected on one date. Each scores the same five weighted criteria." />
-            <KpiCard label="Overall Rating" value={pct0(kpis.rating)} unit="of 100%"
-              icon="grade" color={kpis.rating < 0.75 ? S.outgoing : kpis.rating < 0.85 ? S.damaged : S.available}
-              tooltip="The average audit score across the selection — the sum of the five weighted criteria ratings." />
-            <KpiCard label="Open Findings" value={num(kpis.open)} unit="awaiting closure"
-              icon="alert" color={S.total}
-              tooltip="Defects raised and not yet closed. Excludes “Compliant” rows, which record that a criterion was checked and nothing was wrong." />
-            <KpiCard label="Closure Rate" value={pct0(kpis.closureRate)} unit={`${num(kpis.closed)} closed`}
-              icon="check" color={kpis.closureRate < 0.5 ? S.damaged : S.available}
-              tooltip="Closed findings as a share of everything raised and resolved either way. N/A rows are excluded from both sides." />
-            <KpiCard label="Record Accuracy" value={pct0(kpis.accuracy)} unit={`${compact(kpis.countedLines)} lines counted`}
-              icon="inventory" color={kpis.accuracy < 0.85 ? S.damaged : S.available}
-              tooltip="Share of cycle-counted lines the auditor marked HIT — SAP agreed with the floor." />
-            <KpiCard label="Count Exposure" value={`₱${compact(kpis.exposure)}`} unit="variance value found"
-              icon="reports" color={S.value}
-              tooltip="Total peso value of the gaps the cycle counts uncovered, as recorded on the count sheet." />
-          </div>
+          <section className="au-hero">
+            <div className="au-hero-focus">
+              <RatingGauge value={kpis.rating} color={gradeColor} marks={GRADE_MARKS} caption="of 100%" />
+              <div className="au-hero-say">
+                <span className="au-eyebrow">Overall audit rating</span>
+                <h2 className="au-hero-title">{grade.label}</h2>
+                <Delta trend={ratingTrend} />
+                <p className="au-hero-note">
+                  {num(kpis.audits)} audit{kpis.audits === 1 ? '' : 's'} across {num(kpis.projects)} project{kpis.projects === 1 ? '' : 's'}
+                  {span && <>, {span}</>}.
+                  {strongest && weakest && standings.length > 1 && (
+                    <> Strongest <b>{strongest.project}</b> at {pct0(strongest.rating)}; weakest <b>{weakest.project}</b> at {pct0(weakest.rating)}.</>
+                  )}
+                </p>
+              </div>
+            </div>
 
-          <div className="grid grid-2 audit-grid">
-            <Card title="Inspection Criteria" icon="grade" iconColor={S.neutral}
-              sub={`Weighted scorecard · ${scope}`}>
+            <div className="au-hero-panel">
+              <span className="au-eyebrow">Where the score goes</span>
               <Scorecard card={card} />
-            </Card>
+              <span className="au-hero-foot">Each meter is the score earned against that criterion’s own weight.</span>
+            </div>
 
-            <Card title="Final Rating per Month" icon="trend" iconColor={S.total}
-              sub={months.length ? `${months.length} months on record · ${num(kpis.audits)} audits` : 'No audits in this selection'}
-              foot={<span className="muted">Each bar is the mean of that month’s audits. Green from 85%, amber from 75%, red below.</span>}>
-              {months.length
-                ? <RatingsByMonthChart data={months} average={kpis.rating} />
-                : <NoData what="No audits in this period" why="Widen the project, type or date selection above." />}
-            </Card>
-          </div>
+            <div className="au-hero-strip">
+              <Stat label="Open findings" value={num(kpis.open)} tone={kpis.open ? S.total : undefined}
+                meta={kpis.open ? `oldest ${num(oldestOpenDays(data.findings, asOf))} days` : 'nothing outstanding'} />
+              <Stat label="Closure rate" value={pct0(kpis.closureRate)}
+                tone={kpis.closureRate < 0.5 ? S.damaged : S.available}
+                meta={`${num(kpis.closed)} closed to date`} />
+              <Stat label="Record accuracy" value={pct1(kpis.accuracy)}
+                tone={kpis.accuracy < 0.85 ? S.damaged : S.available}
+                meta={`${compact(kpis.countedLines)} lines cycle-counted`} />
+              <Stat label="Count exposure" value={`₱${compact(kpis.exposure)}`}
+                meta="peso value of the gaps found" />
+            </div>
+          </section>
 
-          <div className="grid grid-2 audit-grid">
+          <Card title="Final Rating per Month" icon="trend" iconColor={S.total}
+            sub={months.length ? `${months.length} months on record · ${num(kpis.audits)} audits` : 'No audits in this selection'}
+            right={ratingTrend && (
+              <span className="au-headline-chip">
+                <b className="tabular">{pct0(ratingTrend.latest.rating)}</b>
+                <em>{ratingTrend.latest.label} {ratingTrend.latest.year}</em>
+              </span>
+            )}
+            foot={<span className="muted">Each bar is the mean of that month’s audits. Green from 85%, amber from 75%, red below.</span>}>
+            {months.length
+              ? <RatingsByMonthChart data={months} average={kpis.rating} height={330} />
+              : <NoData what="No audits in this period" why="Widen the project, type or date selection above." />}
+          </Card>
+
+          <div className="au-split wide-left">
             <Card title="Highest-Risk Audit Areas" icon="alert" iconColor={S.total}
               sub="Open findings by classification"
               foot={<span className="muted">Ranked by the count of findings still open — not by the report’s own Top-N measure, which ranks finding text alphabetically. See the changelog.</span>}>
@@ -311,16 +440,44 @@ export default function AuditTab() {
                 : <NoData what="Nothing open" why="Every finding in this selection has been closed." />}
             </Card>
 
-            <Card title="Open Risk by Root Cause" icon="flow" iconColor={S.incoming}
-              sub={themeSplit.length ? 'People, Process or Tools — as classified by the auditor' : 'The auditor recorded no People/Process/Tools theme here'}>
-              {themeSplit.length
-                ? <RootCauseSplitChart data={themeSplit} />
-                : <NoData what="No theme recorded" why="Root causes in this selection are free text with no People/Process/Tools prefix." />}
+            <Card title="Project Standings" icon="location" iconColor={S.neutral}
+              sub={`${num(standings.length)} project${standings.length === 1 ? '' : 's'} by average rating`}
+              foot={<span className="muted">Click a project to filter the whole tab to it. The report has no equivalent — its Project slicer answers one project at a time.</span>}>
+              {standings.length
+                ? <RankList
+                    rows={standings.map((p) => ({
+                      key: p.project,
+                      name: p.project,
+                      meta: `${p.audits} audit${p.audits === 1 ? '' : 's'} · last ${fmtDate(p.latest)} at ${pct0(p.latestRating)}`,
+                      value: pct0(p.rating),
+                      weight: p.rating,
+                      color: { critical: S.outgoing, watch: S.damaged, good: S.available, strong: S.available }[ratingGrade(p.rating).key],
+                    }))}
+                    max={1}
+                    active={f.project}
+                    scroll
+                    onPick={(r) => setF((cur) => ({ ...cur, project: cur.project === r.key ? '' : r.key }))}
+                  />
+                : <NoData what="Nothing rated" why="No audit in this selection carries a rating." />}
             </Card>
           </div>
 
           <Card title="Open Findings by Root Cause" icon="reports" iconColor={S.neutral} pad={false}
-            sub={`${num(causes.reduce((a, r) => a + r.count, 0))} open findings across ${causes.length} distinct causes`}>
+            sub={`${num(causes.reduce((a, r) => a + r.count, 0))} open findings across ${causes.length} distinct causes`}
+            right={themeSplit.length > 0 && (
+              // The People/Process/Tools split used to be a card of its own holding one
+              // three-bar chart. It is the same three numbers, and it belongs to this
+              // table — so it rides in the header as a legend-sized reading instead of
+              // costing a whole card for three bars.
+              <span className="au-inline-split">
+                {themeSplit.map((t, i) => (
+                  <span key={t.name} className="au-chip">
+                    <i style={{ background: [S.total, S.incoming, S.neutral][i % 3] }} />
+                    {t.name} <b className="tabular">{num(t.value)}</b>
+                  </span>
+                ))}
+              </span>
+            )}>
             {causes.length
               ? <DataTable columns={ROOT_CAUSE_COLUMNS} rows={causes} pageSize={10} />
               : <div className="card-pad"><NoData what="Nothing open" why="No open finding in this selection." /></div>}
@@ -331,27 +488,63 @@ export default function AuditTab() {
       {/* ----------------------------------------------------- Record Accuracy */}
       {view === 'accuracy' && (
         <div className="mt overview-stack">
-          <div className="kpi-grid kpi-grid-4">
-            <KpiCard label="Lines Counted" value={num(kpis.countedLines)} unit="cycle-count lines"
-              icon="inventory" color={S.neutral}
-              tooltip="Every item line counted during an audit in this selection." />
-            <KpiCard label="Record Accuracy" value={pct1(kpis.accuracy)}
-              unit={`${num(Math.round(kpis.accuracy * kpis.countedLines))} hit`}
-              icon="check" color={kpis.accuracy < 0.85 ? S.damaged : S.available}
-              tooltip="Share of lines marked HIT by the auditor. The count sheet's own verdict, not a recomputation." />
-            <KpiCard label="Lines Missed" value={num(kpis.countedLines - Math.round(kpis.accuracy * kpis.countedLines))}
-              unit="SAP disagreed with the floor" icon="alert" color={S.total}
-              tooltip="Lines where the system quantity did not match the physical count." />
-            <KpiCard label="Total Exposure" value={`₱${compact(kpis.exposure)}`} unit="variance value"
-              icon="reports" color={S.value}
-              tooltip="The peso value of every gap found, as the count sheet records it — absolute, so shorts and overs both add to it." />
-          </div>
+          <section className="au-hero">
+            <div className="au-hero-focus">
+              <RatingGauge value={kpis.accuracy} marks={GRADE_MARKS}
+                color={kpis.accuracy < 0.85 ? S.damaged : S.available}
+                caption="lines matched" />
+              <div className="au-hero-say">
+                <span className="au-eyebrow">Inventory record accuracy</span>
+                <h2 className="au-hero-title">{kpis.accuracy < 0.85 ? 'Below the 85% target' : 'On target'}</h2>
+                <Delta trend={accuracyTrend} />
+                <p className="au-hero-note">
+                  {span && <>{span}. </>}
+                  {accuracyRange && (
+                    <>Weakest month <b>{accuracyRange.worst.label} {accuracyRange.worst.year}</b> at {pct0(accuracyRange.worst.accuracy)},
+                    strongest <b>{accuracyRange.best.label} {accuracyRange.best.year}</b> at {pct0(accuracyRange.best.accuracy)}. </>
+                  )}
+                  {num(itemsWithVariance)} of {num(items.length)} items counted came up short or over.
+                </p>
+              </div>
+            </div>
 
-          <Card title="Inventory Record Accuracy" icon="trend" iconColor={S.total}
+            <div className="au-hero-panel">
+              <span className="au-eyebrow">Largest exposure by item</span>
+              {items.length
+                ? <RankList rows={exposureLeaders(items, 5).map((r) => ({
+                    key: r.name,
+                    name: r.name,
+                    meta: `${num(Math.abs(r.variance))} ${r.variance < 0 ? 'short' : 'over'} · ${r.lines} count${r.lines === 1 ? '' : 's'}`,
+                    value: `₱${compact(r.varianceValue)}`,
+                    weight: r.varianceValue,
+                    color: S.value,
+                  }))} />
+                : <NoData what="Nothing counted" why="No cycle count in this selection." />}
+              <span className="au-hero-foot">The table below sorts by units short; this sorts the same rows by money.</span>
+            </div>
+
+            <div className="au-hero-strip">
+              <Stat label="Lines counted" value={num(kpis.countedLines)} meta={`${num(items.length)} distinct items`} />
+              <Stat label="Lines matched" value={num(Math.round(kpis.accuracy * kpis.countedLines))}
+                tone={S.available} meta="SAP agreed with the floor" />
+              <Stat label="Lines missed" value={num(kpis.countedLines - Math.round(kpis.accuracy * kpis.countedLines))}
+                tone={S.total} meta="system and floor disagreed" />
+              <Stat label="Total exposure" value={`₱${compact(kpis.exposure)}`}
+                meta={accuracy.length ? `across ${accuracy.length} counted months` : 'no counts in range'} />
+            </div>
+          </section>
+
+          <Card title="Accuracy per Month" icon="trend" iconColor={S.total}
             sub="Counted lines that hit and missed, with the resulting accuracy"
+            right={accuracyTrend && (
+              <span className="au-headline-chip">
+                <b className="tabular">{pct0(accuracyTrend.latest.accuracy)}</b>
+                <em>{accuracyTrend.latest.label} {accuracyTrend.latest.year}</em>
+              </span>
+            )}
             foot={<span className="muted">Bars are counted lines (left axis, hit in green beneath miss in red); the line is accuracy (right axis). Stack height is how big that month’s count was.</span>}>
             {accuracy.length
-              ? <AccuracyChart data={accuracy} />
+              ? <AccuracyChart data={accuracy} height={340} />
               : <NoData what="No counts in this selection" why="No cycle count was recorded for these projects and dates." />}
           </Card>
 
@@ -375,15 +568,52 @@ export default function AuditTab() {
       {/* ------------------------------------------------------------ Findings */}
       {view === 'findings' && (
         <div className="mt overview-stack">
-          <div className="audit-crit-bar">
-            <Segmented size="sm" value={criteria} onChange={(v) => { setCriteria(v); setBand(null) }}
-              options={FINDING_CRITERIA.map((c) => ({
-                value: c, label: CRITERIA_META[c]?.short || c, icon: CRITERIA_META[c]?.icon,
-              }))} />
-            <span className="muted audit-crit-note">{CRITERIA_META[criteria]?.note}</span>
-          </div>
+          <section className="au-hero">
+            <div className="au-hero-focus">
+              <RatingGauge value={critRow.closureRate} marks={[0.5, 0.8]}
+                color={critRow.closureRate < 0.5 ? S.outgoing : critRow.closureRate < 0.8 ? S.damaged : S.available}
+                caption="closed" />
+              <div className="au-hero-say">
+                <span className="au-eyebrow">{CRITERIA_META[criteria]?.short || criteria}</span>
+                <h2 className="au-hero-title">{num(critRow.open)} finding{critRow.open === 1 ? '' : 's'} still open</h2>
+                <p className="au-hero-note">
+                  {CRITERIA_META[criteria]?.note}{' '}
+                  {critRow.open > 0 && <>The oldest has gone unresolved for <b>{num(oldestOpenDays(critFindings, asOf))} days</b>.</>}
+                </p>
+              </div>
+            </div>
 
-          <div className="grid grid-2 audit-grid">
+            <div className="au-hero-panel">
+              <span className="au-eyebrow">Backlog by inspection area</span>
+              {/* This replaced a four-button selector. A selector shows the state of the
+                  one area you clicked; this shows all four and is still what you click,
+                  which is the question the view exists to answer. */}
+              <RankList
+                rows={breakdown.map((b) => ({
+                  key: b.criteria,
+                  name: CRITERIA_META[b.criteria]?.short || b.criteria,
+                  meta: `${num(b.raised)} raised · ${pct0(b.closureRate)} closed`,
+                  value: num(b.open),
+                  weight: b.open,
+                  color: b.open === 0 ? S.available : b.closureRate < 0.5 ? S.outgoing : S.damaged,
+                }))}
+                active={criteria}
+                onPick={(r) => { setCriteria(r.key); setBand(null) }}
+              />
+              <span className="au-hero-foot">Numbers are findings still open. Click an area to drive the charts below.</span>
+            </div>
+
+            <div className="au-hero-strip">
+              <Stat label="Raised" value={num(critRow.raised)} meta="defects on record for this area" />
+              <Stat label="Still open" value={num(critRow.open)} tone={critRow.open ? S.total : S.available}
+                meta={`${num(bands.find((b) => b.key === '120+')?.count || 0)} over 120 days`} />
+              <Stat label="Closed" value={num(critRow.closed)} tone={S.available} meta="resolved against an action plan" />
+              <Stat label="Closure rate" value={pct0(critRow.closureRate)}
+                tone={critRow.closureRate < 0.5 ? S.damaged : S.available} meta="of everything resolved either way" />
+            </div>
+          </section>
+
+          <div className="au-split wide-left">
             <Card title="Raised and Closed per Month" icon="trend" iconColor={S.total}
               sub={`${CRITERIA_META[criteria]?.short || criteria} · ${scope}`}
               foot={<span className="muted">Raised above the line, closed below it. The orange line is the running total of open findings — it counts what was raised, so closing one does not pull it down.</span>}>

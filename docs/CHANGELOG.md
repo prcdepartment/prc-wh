@@ -4174,3 +4174,116 @@ mis-filled on all three sheets of this file (they had it right on 09-21); the SO
 lost BOH/In/Out; the location sheet is missing again; and the Unit Price column is back but
 empty on 99% of rows — which is still the five-snapshot-old question of where the
 authoritative price list lives.
+
+### 2026-10-05 — Session: the Audit tab stops being a grid of boxes
+
+**What was asked.** "The current tiling structure of each card is boring. Restructure.
+Make modern. Good for executive level presentation."
+
+**The diagnosis, because it shapes everything below.** The tab was six identically
+weighted KPI boxes, then three 50/50 card pairs, then a table. Nothing was wrong with
+any single card; the problem was that the page had **no reading order**. Six equal boxes
+assert that every number matters the same amount — in an audit programme the rating is
+the answer and everything else is why it is what it is — and a column of equal halves
+gives the eye no reason to look left before right. That is what reads as "boring": not
+the styling, the absence of hierarchy.
+
+#### The new shape
+
+Each of the three sub-views now opens with **one headline panel** and nothing else
+competing with it:
+
+```
+┌── OVERALL AUDIT RATING ──────────┬── WHERE THE SCORE GOES ─────────────┐
+│   ╭────╮   Needs Attention       │  ▦ Inventory Record Accuracy 34/40  │
+│   │83% │   ↑ 1.1 pts vs Aug 2026 │  ▦ Warehouse Organization    10/10  │
+│   ╰────╯   70 audits, 24 projects│  ▦ Warehouse Planning        11/15  │
+│            Strongest DD Meridian │  ▦ Warehouse Operations      15/20  │
+│            97%, weakest Avesta 57│  ▦ Security and Safety       13/15  │
+├──────────────┬───────────────┬───┴───────────┬─────────────────────────┤
+│ OPEN 201     │ CLOSURE 59%   │ ACCURACY 86.5%│ EXPOSURE ₱75.9M         │
+│ oldest 609 d │ 286 closed    │ 3.2K counted  │ peso value of the gaps  │
+└──────────────┴───────────────┴───────────────┴─────────────────────────┘
+```
+
+One surface, three regions divided by hairlines rather than by being separate cards —
+the point being that it has to read as one instrument, not four adjacent objects. Below
+it: a full-width chart, then an asymmetric **7:5** pair, then the table. Never another
+50/50.
+
+| view | ring | panel beside it | strip |
+|---|---|---|---|
+| Summary | overall rating, graded | the five weighted criteria as meters | open · closure · accuracy · exposure |
+| Record Accuracy | share of lines matched | the five items carrying most peso exposure | counted · matched · missed · exposure |
+| Findings | closure rate for the selected area | backlog by inspection area, ranked and clickable | raised · open · closed · closure rate |
+
+#### What got added, what got deleted
+
+**Added, and all of it derived from rows already loaded** — `ratingGrade` (one named
+band list instead of magic 0.75/0.85 scattered through components), `seriesTrend`
+(period-on-period movement in percentage POINTS, against the previous month *in the
+series* — the programme skips months and comparing September to a month nobody audited
+would invent a gap), `projectStandings`, `exposureLeaders`, `oldestOpenDays`,
+`auditWindow`, `criteriaBreakdown`.
+
+**Project Standings is the one genuinely new capability.** The report has a Project
+slicer, so the only way to learn which site is struggling was to pick each of 24 in
+turn. The card ranks all of them and each row is a filter — clicking the bottom row
+(Avesta Residences, 57% over 3 audits) narrows the whole tab to it. Scrolled inside a
+336px cap, because 24 rows beside a five-bar chart otherwise sets the height of the row.
+
+**Deleted:** the six-tile KPI grid on Summary and the four-tile one on Record Accuracy
+(`.kpi-grid-4` is gone); the "Open Risk by Root Cause" card and its chart
+(`RootCauseSplitChart`), which spent a whole card on three bars — the same three numbers
+now ride in the findings table's header as chips; the four-button criteria selector on
+Findings, replaced by the ranked backlog panel, which shows all four areas at once and
+is still the thing you click; and the scorecard's TOTAL row, because the ring beside it
+*is* the total and printing a number twice in one panel only invites the reader to check
+whether the two agree.
+
+#### Three faults found by looking at it rendered
+
+1. **The ring and the headline printed the same thing.** "83% NEEDS ATTENTION" inside
+   the ring, "Needs Attention" in 25px type 20 pixels to its right. Record Accuracy was
+   worse: ring read `86%`, headline read `86.5% of counted lines agreed` — the same
+   figure twice, rounded two ways, which invites the reader to wonder which is right.
+   The ring's caption now says what the number is out of; the headline is the verdict.
+2. **Two hero sentences restated the strip directly beneath them.** Record Accuracy's
+   repeated three of its four figures. It now carries what the strip cannot: the spread
+   (weakest month Aug 2025 at 56%, strongest Apr 2025 at 100% — a programme averaging
+   86% made of *those* is a different problem from one made of 84% and 88%) and that 369
+   of 1,619 items came up short or over.
+3. **The backlog list was numbered 1–4 in the audit form's order** while the counts read
+   96, 6, 30, 69. A rank column that is not a ranking looks like a bug. Ordered by open
+   count now: 96, 69, 30, 6.
+
+#### Contrast, measured in both themes
+
+40 text/background pairs across the new panel elements, measured against the WCAG
+threshold each one's own size and weight earns (3.0 for large text, 4.5 otherwise):
+**zero failures in either theme** — light min 3.82, dark min 4.31, both on 23px/800
+figures that need 3.0. Two real misses were found and fixed on the way:
+
+* `.au-stat-meta` at 4.31:1 — `--text-faint` is tuned for `--surface`, and the strip
+  sits on `--surface-2`. Swapped to `--text-muted`, which this stylesheet already does
+  elsewhere for exactly this reason.
+* `.au-headline-chip b` at 3.67:1 — the chip's figure was tinted with the grade colour
+  at 15px. It did not need the tint: the chart directly beneath colours every bar by the
+  same rule, so the chip was the only place the colour did no work.
+
+*(A first dark-mode sweep reported seven failures. That was the test, not the page: it
+flipped `data-theme` on the root without letting React re-render, so the CSS background
+went dark while the inline series colours stayed light. Re-measured through the app's own
+theme toggle, dark is clean. Worth remembering — the audit charts take their colours from
+JS, so any contrast check on them has to drive the real toggle.)*
+
+**Verified** at 1440x900 and 375x812, light and dark, against the real dataset: no
+horizontal page overflow at 375 (`scrollWidth === innerWidth`), no console errors beyond
+the expected Supabase 400 from the dev login fallback, the hero stacking to one column at
+1100px and the strip to 2-up at 1240px and 1-up at 520px, and the standings click-through
+narrowing the tab to Avesta Residences and re-grading it to "Needs Intervention".
+`npm run build` passes; AuditTab is 32 KB, gzipped to 9.4.
+
+**No figure changed.** Every number still reconciles with the Power BI report exactly as
+the 2026-09-21 entry records — this was a restructure of how they are presented, not of
+what they are.

@@ -450,3 +450,148 @@ export function findingAge(f, asOf = auditAsOf()) {
   if (!isOpen(f) || !f.date) return null
   return Math.max(0, Math.round((Date.parse(asOf) - Date.parse(f.date)) / 86400000))
 }
+
+// ---------------------------------------------------------------------------
+// Executive readings
+//
+// Everything below answers a question a number alone does not: is 83% good, is it
+// moving, and who is dragging it. None of it is new data — it is the same rows read
+// the way someone presenting to a board has to read them.
+// ---------------------------------------------------------------------------
+
+// The grade bands the dashboard colours and labels by. They are the app's own reading,
+// NOT a threshold the audit form defines — the instrument scores out of 100 and says
+// nothing about what counts as a pass — so they live here as one named list rather than
+// scattered as magic numbers through the components, and changing the boundary is one
+// edit. 75 and 85 are the two the charts already drew in amber and green before this
+// band list existed; 95 was added only to give a genuinely strong result its own word.
+export const RATING_BANDS = [
+  { key: 'critical', max: 0.75, label: 'Needs Intervention', blurb: 'below the 75% line' },
+  { key: 'watch', max: 0.85, label: 'Needs Attention', blurb: 'between 75% and 85%' },
+  { key: 'good', max: 0.95, label: 'Satisfactory', blurb: 'at or above 85%' },
+  { key: 'strong', max: Infinity, label: 'Strong', blurb: 'at or above 95%' },
+]
+
+/** Grade a 0–1 rating. Returns the band, never null. */
+export function ratingGrade(v) {
+  return RATING_BANDS.find((b) => (v || 0) < b.max) || RATING_BANDS[RATING_BANDS.length - 1]
+}
+
+/**
+ * Where a monthly series stands and which way it is going.
+ *
+ * `delta` is in PERCENTAGE POINTS, not per cent of the previous value — a move from
+ * 88% to 90% is "up 2 points", and calling it "up 2.3%" would be a different and
+ * wronger statement. `previous` is the month before the latest one IN THE SERIES, not
+ * the previous calendar month: the audit programme skips months (nothing between
+ * September 2025 and March 2026), and comparing September to a month that was never
+ * audited would invent a gap.
+ */
+export function seriesTrend(rows, key = 'rating') {
+  if (!rows.length) return null
+  const latest = rows[rows.length - 1]
+  const previous = rows.length > 1 ? rows[rows.length - 2] : null
+  const points = previous ? Math.round((latest[key] - previous[key]) * 1000) / 10 : null
+  return {
+    latest,
+    previous,
+    points,
+    direction: points === null || points === 0 ? 'flat' : points > 0 ? 'up' : 'down',
+  }
+}
+
+/**
+ * Every project in the selection, ranked by its average audit rating.
+ *
+ * This is the view the report has no equivalent of: it has a Project slicer, so the
+ * only way to learn which site is struggling is to pick each of 24 in turn. `audits`
+ * is carried because a project rated on one visit and one rated on six are not equally
+ * settled numbers, and `latest` because a project that was weak in February and has
+ * not been back to since is a different problem from one that is weak now.
+ */
+export function projectStandings(ratings) {
+  const byAudit = groupBy(ratings, auditKey)
+  const byProject = new Map()
+  for (const [key, rows] of byAudit) {
+    const project = key.split('|')[1]
+    const date = key.slice(0, 10)
+    const total = rows.reduce((a, r) => a + r.rating, 0)
+    if (!byProject.has(project)) byProject.set(project, { project, totals: [], latest: '', latestRating: 0 })
+    const p = byProject.get(project)
+    p.totals.push(total)
+    if (date > p.latest) { p.latest = date; p.latestRating = total }
+  }
+  return [...byProject.values()]
+    .map((p) => ({
+      project: p.project,
+      rating: mean(p.totals),
+      audits: p.totals.length,
+      latest: p.latest,
+      latestRating: p.latestRating,
+      type: TYPE_BY_AUDIT.get(`${p.latest}|${p.project}`) || UNCLASSIFIED,
+    }))
+    .sort((a, b) => b.rating - a.rating || a.project.localeCompare(b.project))
+}
+
+/**
+ * The items carrying the most peso exposure, worst first.
+ *
+ * The variance table is ordered by shortfall in UNITS, which is the right default for
+ * a warehouseman chasing stock but the wrong one for a board: 1,892 missing rebar bars
+ * and 3 missing drums of primer sort the opposite way by count and by money. This reads
+ * the same rows by value.
+ */
+export function exposureLeaders(items, limit = 6) {
+  return [...items]
+    .filter((r) => r.varianceValue > 0)
+    .sort((a, b) => b.varianceValue - a.varianceValue)
+    .slice(0, limit)
+}
+
+/** The longest any finding in the set has been open, in days. 0 when none are. */
+export function oldestOpenDays(findings, asOf = auditAsOf()) {
+  return findings.reduce((m, f) => {
+    const age = isDefect(f) ? findingAge(f, asOf) : null
+    return age !== null && age > m ? age : m
+  }, 0)
+}
+
+/**
+ * The audit window a selection covers, as a phrase — "Feb 2025 – Sep 2026", or just
+ * "Sep 2026" when it is one month. Returns '' when there is nothing to describe, so a
+ * caller can drop the clause rather than print an empty range.
+ */
+export function auditWindow(rows) {
+  const dates = rows.map((r) => r.date).filter(Boolean).sort()
+  if (!dates.length) return ''
+  const fmt = (d) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`
+  const from = fmt(dates[0])
+  const to = fmt(dates[dates.length - 1])
+  return from === to ? from : `${from} – ${to}`
+}
+
+/**
+ * One row per inspection criterion: how many defects it has raised, how many are still
+ * open, and what share has been closed.
+ *
+ * Replaces what used to be a four-button selector on the Findings view. A selector
+ * shows the state of the one area you have clicked; this shows all four at once and is
+ * still the thing you click — which is the whole question that view exists to answer
+ * ("where is the backlog?") rather than a control that makes you hunt for it.
+ */
+export function criteriaBreakdown(findings, criteriaList) {
+  const byCriteria = groupBy(findings.filter(isDefect), (f) => f.criteria)
+  return criteriaList.map((criteria) => {
+    const rows = byCriteria.get(criteria) || []
+    const open = rows.filter(isOpen).length
+    const closed = rows.filter((f) => f.status === 'Closed').length
+    return {
+      criteria,
+      open,
+      closed,
+      raised: rows.length,
+      // N/A rows are neither open nor closed and belong in neither side of the ratio.
+      closureRate: open + closed ? closed / (open + closed) : 0,
+    }
+  })
+}

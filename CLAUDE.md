@@ -164,6 +164,15 @@ reconciled against that report's own rendered numbers** (unfiltered and under ea
 Project Type split) before any of it was drawn — see the 2026-09-21 changelog entry for
 the reconciliation table and for the one visual that deliberately does not match.
 
+**Audit's layout rule (2026-10-05): no grids of equal tiles.** Each sub-view opens with
+one headline panel (`.au-hero`) — a ring and a verdict, the detail that explains it
+beside, supporting figures on a hairline-separated strip underneath — and everything
+below it is an asymmetric 7:5 pair (`.au-split`) or a full-width table. Six equally
+weighted KPI boxes say every number matters the same amount, which in an audit programme
+is never true. Keep new cards off the 50/50 grid, and **never print the same figure in a
+panel twice** (the ring and its headline, a sentence and the strip under it) — that is
+the failure mode this layout keeps producing, and it reads as a discrepancy.
+
 ## Changelog
 
 Moved to **`docs/CHANGELOG.md`** on 2026-09-10. This file is re-read in full on every

@@ -17,7 +17,7 @@ import {
 } from 'recharts'
 import { useEffect, useState } from 'react'
 import { num, peso, compact } from '../lib/format'
-import { seriesFor, movementFor, categoricalFor } from '../lib/colors'
+import { seriesFor, movementFor } from '../lib/colors'
 import { useTheme } from '../context/ThemeContext'
 
 const axis = { fontSize: 11, fill: 'var(--text-muted)', fontWeight: 600 }
@@ -371,31 +371,54 @@ export function AgingChart({ bands, height = 300, onPick }) {
   )
 }
 
+/* -------------------------------------------------------------------- gauge --- */
+
 /**
- * Root-cause split — how much of the open risk is People, Process or Tools.
+ * The headline ring: one rating, large, with the grade thresholds notched onto the
+ * track so the number is read against the scale rather than in a vacuum.
  *
- * A small horizontal bar rather than a pie: three categories, and the question is
- * "which is biggest by how much", which a bar answers and a pie does not.
+ * Hand-drawn SVG rather than a Recharts RadialBarChart on purpose. Recharts would pull
+ * a ResponsiveContainer and a layout pass in to draw two arcs, and — the part that
+ * actually matters — it measures its parent before it renders, so in a flex column that
+ * has not settled it draws at zero and never recovers. This is a fixed-size figure; it
+ * should not depend on a measurement at all.
+ *
+ * `marks` are drawn as notches ACROSS the track, not as labels: at this size a label
+ * every 10 percentage points is noise, but a notch at the two boundaries that change
+ * the verdict (75% and 85%) is what lets someone see "just under the line" without
+ * reading anything.
  */
-export function RootCauseSplitChart({ data, height = 170 }) {
-  const { theme } = useTheme()
-  const C = categoricalFor(theme)
+export function RatingGauge({ value, color, size = 168, stroke = 14, marks = [], caption }) {
+  const pct = Math.max(0, Math.min(1, value || 0))
+  const r = (size - stroke) / 2
+  const circumference = 2 * Math.PI * r
+  const centre = size / 2
+  // -90deg so the arc starts at twelve o'clock; SVG angles run from three.
+  const pointOnRing = (t, radius) => {
+    const a = (t * 360 - 90) * (Math.PI / 180)
+    return [centre + radius * Math.cos(a), centre + radius * Math.sin(a)]
+  }
+
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 52, bottom: 4, left: 4 }}>
-        <CartesianGrid horizontal={false} stroke={gridColor} strokeDasharray="3 3" />
-        <XAxis type="number" tick={axis} tickLine={false} axisLine={false} allowDecimals={false} />
-        <YAxis type="category" dataKey="name" tick={axis} tickLine={false} axisLine={false} width={84} />
-        <Tooltip cursor={{ fill: 'var(--surface-2)' }}
-          content={({ active, payload }) => (active && payload?.length
-            ? <Box><b>{payload[0].payload.name}</b> — {num(payload[0].value)} open findings</Box>
-            : null)} />
-        <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={24} isAnimationActive={false}>
-          {data.map((d, i) => <Cell key={d.name} fill={C[i % C.length]} fillOpacity={0.9} />)}
-          <LabelList dataKey="value" position="right"
-            style={{ fontSize: 11, fontWeight: 800, fill: 'var(--text)' }} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <div className="au-gauge" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <circle cx={centre} cy={centre} r={r} fill="none" stroke="var(--border)" strokeWidth={stroke} />
+        <circle
+          cx={centre} cy={centre} r={r} fill="none"
+          stroke={color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={`${circumference * pct} ${circumference}`}
+          transform={`rotate(-90 ${centre} ${centre})`}
+        />
+        {marks.map((m) => {
+          const [x1, y1] = pointOnRing(m, r - stroke / 2)
+          const [x2, y2] = pointOnRing(m, r + stroke / 2)
+          return <line key={m} x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--surface)" strokeWidth="2.5" />
+        })}
+      </svg>
+      <div className="au-gauge-face">
+        <span className="au-gauge-value tabular" style={{ color }}>{Math.round(pct * 100)}<i>%</i></span>
+        {caption && <span className="au-gauge-caption">{caption}</span>}
+      </div>
+    </div>
   )
 }

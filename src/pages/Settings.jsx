@@ -30,7 +30,15 @@ export default function Settings() {
             <b>{live ? 'Supabase Postgres' : 'No data loaded'}</b>
             <div className="muted" style={{ fontSize: 12 }}>
               {live
-                ? 'Loaded from the database at sign-in.'
+                ? <>
+                    Loaded from the database at sign-in.
+                    {/* Which workbook the figures are, as the database itself reports it.
+                        Worth stating here because an administrator can replace it from
+                        Import Data, so it is no longer a constant anyone can read off a
+                        source file. */}
+                    {hydrationStatus.snapshotDate && <> Snapshot <b>{hydrationStatus.snapshotDate}</b>
+                      {hydrationStatus.snapshotSource && <>, from {hydrationStatus.snapshotSource}</>}.</>}
+                  </>
                 : `The app carries no built-in dataset — everything comes from the database${hydrationStatus.error ? `. Reason: ${hydrationStatus.error}` : ''}.`}
             </div>
           </div>

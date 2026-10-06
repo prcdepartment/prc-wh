@@ -40,6 +40,9 @@ const paths = {
   tag: <><path d="M3 12.5V4a1 1 0 011-1h8.5L21 11.5 12.5 20 3 12.5z" /><circle cx="7.5" cy="7.5" r="1.4" /></>,
   location: <><path d="M12 21s-7-6-7-11a7 7 0 0114 0c0 5-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></>,
   doc: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /></>,
+  // Import Data. A sheet with an arrow going INTO it, rather than the usual cloud —
+  // what this module does is push a workbook into the database, not fetch one.
+  upload: <><path d="M20 15v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4" /><path d="M12 3v12" /><path d="M7.5 8.5L12 3l4.5 5.5" /></>,
   image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9.5" r="1.5" /><path d="M21 16l-5-5-9 9" /></>,
   filter: <><path d="M3 5h18l-7 8v6l-4 2v-8L3 5z" /></>,
   trend: <><path d="M3 17l6-6 4 4 8-8" /><path d="M15 7h6v6" /></>,

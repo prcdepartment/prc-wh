@@ -25,6 +25,11 @@ Montserrat / Barlow Condensed, light + dark mode.
   went public (2026-08-16). If the load fails the app has no data and says so:
   `hydrationStatus.source === 'empty'` with a reason, surfaced on Settings → *Data source*.
   Master copies of the dataset live in `/private-data/` (gitignored).
+- **The dataset's own date is in the database**, not in a source file: `dataset_meta`
+  row `snapshot_date`. `hydrate()` reads it *before the rebuilds* and calls `setToday()`,
+  which **mutates** `TODAY` in `src/lib/format.js` (`TODAY.setTime`) — never reassigns it,
+  for the same reason the data arrays are filled in place. The literal in `format.js` is
+  only the fallback for a database with no such row.
 - **Auth**: `src/context/AuthContext.jsx` uses Supabase `signInWithPassword`, then reads
   `public.profiles` for the role. The `DEMO_USERS` / `DEMO_PASSWORD` fallback in
   `src/data/roles.js` is `import.meta.env.DEV`-only — production accepts real accounts only.
@@ -68,7 +73,18 @@ are RLS-gated and the pre-render pass returns nothing without a session.
 Consequence: **arrays in `src/data/` must be mutated, never reassigned.** A
 `export const x = [...]` that gets replaced instead of refilled silently breaks hydration.
 
-**Refreshing the data from a new warehouse workbook — the whole loop:**
+**Refreshing the data from a new warehouse workbook — TWO paths, and the stock
+workbook now has a shorter one.**
+
+*In the app (stock workbook only, 2026-10-06 onwards).* Admin → **Import Data**
+(`/import`) uploads the monthly inventory workbook straight into Postgres: parse and
+preview in the browser, stage into `import_rows`, then one `import_commit(uuid)` RPC
+that swaps `inventory` / `ledger` / `safekeeping_*` inside a single transaction and
+moves `dataset_meta.snapshot_date` with them. No node, no SQL editor, no `TODAY` edit.
+This is the routine monthly path.
+
+*On the command line.* Still the way to regenerate `/private-data/` — needed to re-seed
+a database from scratch, and the only path for the delivery tracker and the audit report.
 
 ```bash
 npm run import -- "sample/<stock workbook>.xlsx"            # inventory / ledger / safekeeping
@@ -76,6 +92,16 @@ npm run import:delivery -- "sample/<delivery workbook>.xlsx" # delivery_tracker 
 npm run import:audit -- "sample/<audit workbook>.xlsx"       # audit_ratings / findings / counts
 npm run seed                                                 # /private-data/*.js -> supabase/seed/NN_seed.sql
 ```
+
+**THE READING RULES LIVE IN `src/lib/snapshotRules.js`, SHARED BY BOTH PATHS.** They
+were lifted out of `import-snapshot.mjs` on 2026-10-06 precisely so there can never be
+two answers for one workbook — every rule in that file exists because a real workbook
+broke something, usually silently. `src/lib/xlsx.js` holds the ZIP+XML parse with no
+I/O and no decompressor; node injects `inflateRawSync` (`scripts/lib/xlsx.mjs`,
+synchronous, unchanged signature) and the browser injects `DecompressionStream`.
+**Add a rule in one place only.** Changing a row shape means changing it in three:
+`snapshotRules.js`, the mapper in `src/lib/importSnapshot.js`, and the column list in
+`import_commit` in `schema.sql`.
 
 **Three importers, because they read three different files.** `import-snapshot.mjs`
 handles the monthly stock workbook; `import-delivery-tracker.mjs` handles the OSM Delivery
@@ -86,10 +112,10 @@ Audit Report Data Source, reading three of its ten sheets and skipping the five 
 Each documents its own reading rules and prints a report — read the report, it is where a
 bad workbook shows up. Only run the one whose source actually changed.
 
-After a STOCK import, update `TODAY` in `src/lib/format.js` to the new `SNAPSHOT_DATE`.
-Then **re-run `supabase/schema.sql`** and paste the seed parts into the Supabase SQL
-Editor **in order** (they are split only because the editor rejects a submission over
-~1 MB).
+After a command-line STOCK import, **re-run `supabase/schema.sql`** and paste the seed
+parts into the Supabase SQL Editor **in order** (they are split only because the editor
+rejects a submission over ~1 MB). `TODAY` no longer needs a hand edit — it follows
+`dataset_meta.snapshot_date`, which the seed sets. The in-app importer sets it directly.
 
 **Re-running `schema.sql` is the answer to every schema error, and it is the whole
 answer.** It ends with a CATCH-UP block replaying every column change any migration has
@@ -138,7 +164,8 @@ the rules to the script so the next month is one command.
 | ~~3~~ | ~~All business data lives in JS files~~ | **Fixed 2026-08-16** — all data in Postgres. The JS modules are empty shells; no data ships in the bundle. |
 | ~~4~~ | ~~Role permissions enforced only in the UI~~ | **Fixed 2026-08-16** — RLS on every table, plus a trigger that blocks self-escalation to admin. |
 | 5 | No CI, no tests, no error boundary | |
-| 6 | Writes still go nowhere | Add Material and movement entry are read-only UI; only Safekeeping Requests persist. Phase 3. |
+| 6 | Transactional writes still go nowhere | Add Material and movement entry are read-only UI; only Safekeeping Requests persist. Phase 3. (Reference data *is* now writable — admin → Import Data replaces the whole stock dataset, 2026-10-06.) |
+| 7 | `supabase/migrations/2026-10-06_in_app_import.sql` not yet run | Until `schema.sql` is re-run on the live project, Import Data parses a workbook and then reports the database is not ready. |
 
 ## Commands
 

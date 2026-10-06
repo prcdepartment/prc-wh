@@ -23,6 +23,10 @@ const LowStock = lazy(() => import('./pages/LowStock'))
 const PurchaseRequests = lazy(() => import('./pages/PurchaseRequests'))
 const RequestMaterials = lazy(() => import('./pages/RequestMaterials'))
 const DeliveryTracking = lazy(() => import('./pages/DeliveryTracking'))
+// Admin only, and opened about once a month. Split out like everything else — and
+// more so: it carries the workbook reader, which nobody who never imports should pay
+// to parse.
+const ImportData = lazy(() => import('./pages/ImportData'))
 // The Process Flow module carries its own stylesheet and the generated system model,
 // so it is split out like every other secondary page — nobody pays for the system
 // documentation while looking at the dashboard.
@@ -66,6 +70,9 @@ export default function App() {
       <Route path="/purchase-requests" element={<Protected><PurchaseRequests /></Protected>} />
       <Route path="/request-materials" element={<Protected><RequestMaterials /></Protected>} />
       <Route path="/delivery" element={<Protected><DeliveryTracking /></Protected>} />
+      {/* The page gates itself on the admin role, and the database gates the writes
+          independently — reaching this URL as anyone else shows the restricted notice. */}
+      <Route path="/import" element={<Protected><ImportData /></Protected>} />
       <Route path="/process-flow" element={<Protected><ProcessFlow /></Protected>} />
       {/* Safekeeping is now a dashboard tab rather than its own page; the old path is
           kept as a redirect so existing links and bookmarks still land somewhere real. */}

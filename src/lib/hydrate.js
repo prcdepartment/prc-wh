@@ -16,6 +16,7 @@
 // has no data at all and must say so rather than showing convincing zeroes. The
 // return value carries the reason, which Settings and the Login page surface.
 import { supabase, isConfigured } from './supabase'
+import { setToday } from './format'
 
 import { inventory } from '../data/inventory'
 import { LEDGER, rebuildLedgerSpan } from '../data/ledger'
@@ -156,7 +157,11 @@ const toAudit = (r) => ({
 })
 
 // Last hydration result, for the "Data source" readout on the Settings page.
-export const hydrationStatus = { source: 'empty', error: null, counts: {}, at: null }
+// `snapshotDate` is which workbook the live data came from, as the database itself
+// reports it — see the note on TODAY in src/lib/format.js.
+export const hydrationStatus = {
+  source: 'empty', error: null, counts: {}, at: null, snapshotDate: null, snapshotSource: null,
+}
 
 /**
  * Load everything from Postgres.
@@ -169,7 +174,7 @@ export async function hydrate() {
 }
 
 async function run() {
-  const noData = (error) => ({ source: 'empty', error, counts: {} })
+  const noData = (error) => ({ source: 'empty', error, counts: {}, snapshotDate: null, snapshotSource: null })
   if (!isConfigured) return noData('Supabase is not configured (missing VITE_SUPABASE_* env vars)')
 
   // No session → RLS returns nothing anyway. AuthContext.signIn re-hydrates
@@ -197,6 +202,21 @@ async function run() {
       fetchAll('audit_findings', 'id'),
       fetchAll('audit_counts', 'id'),
     ])
+
+    // WHICH SNAPSHOT THIS DATA IS. Read before the rebuilds below, because every one
+    // of them measures in days before TODAY and would otherwise recompute against the
+    // previous workbook's date. Tolerated as missing: a database created before
+    // 2026-10-06 has no dataset_meta table, and the hard-coded fallback in format.js
+    // is still correct for it — so this must not take the whole hydration down.
+    let meta = []
+    try {
+      meta = await fetchAll('dataset_meta')
+    } catch {
+      /* table not created yet — re-run supabase/schema.sql */
+    }
+    const metaValue = (k) => meta.find((r) => r.key === k)?.value || null
+    const snapshotDate = metaValue('snapshot_date')
+    if (snapshotDate) setToday(snapshotDate)
 
     // Postgres is the only source there is — src/data/ ships empty shells since the
     // repository went public — so these are filled unconditionally. An empty table
@@ -235,6 +255,8 @@ async function run() {
     return {
       source: 'postgres',
       error: null,
+      snapshotDate,
+      snapshotSource: metaValue('snapshot_source'),
       counts: {
         inventory: inv.length, ledger: led.length, safekeeping: soh.length + skIn.length + skOut.length,
         delivery: del.length, movements: mov.length, reservations: res.length,

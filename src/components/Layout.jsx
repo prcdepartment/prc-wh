@@ -59,6 +59,7 @@ const ROUTE_TITLES = {
   '/request-materials': 'Request Materials',
   '/delivery': 'Delivery Tracking',
   '/process-flow': 'Process Flow',
+  '/import': 'Import Data',
 }
 
 function pageTitle(pathname) {

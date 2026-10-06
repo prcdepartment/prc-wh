@@ -4287,3 +4287,144 @@ narrowing the tab to Avesta Residences and re-grading it to "Needs Intervention"
 **No figure changed.** Every number still reconciles with the Power BI report exactly as
 the 2026-09-21 entry records — this was a restructure of how they are presented, not of
 what they are.
+
+---
+
+### 2026-10-06 — Session: an Import module, so refreshing the data stops needing a developer
+
+**What was asked.** "Create an import function, that takes in excel sheet to update
+inventory data. Add it as one of the modules in the side bar. Only for admin use."
+Reference file: `sample/MCC. PRC. WM. CW Taytay Inventory. 2026 10 05.xlsx`.
+
+**The problem it solves.** Moving the live site to a new month's workbook took four
+steps, a checkout and node: `npm run import` → `npm run seed` → re-run `schema.sql` →
+paste the generated SQL files into the Supabase editor in order. The person who
+actually receives the workbook every month cannot do any of that, so the live data
+only moved when a developer happened to be in the repository. Admin → **Import Data**
+is the same operation, done from the browser, in three clicks.
+
+#### The one decision everything else follows from: ONE set of reading rules
+
+The obvious implementation — write a second, browser-side workbook reader — was
+rejected outright. `scripts/import-snapshot.mjs` was 860 lines of rules, and **every
+one of them exists because a real workbook broke something**, usually silently: a
+column read one position to the left still imports, it just imports the wrong thing. A
+second implementation would drift, and the drift would surface as two different
+valuations of the same warehouse with no way to tell which was right.
+
+So the rules moved into shared modules that both callers use:
+
+| file | what it is | who calls it |
+|---|---|---|
+| `src/lib/xlsx.js` | the ZIP walk + XML parse — **no I/O, no decompressor** | both |
+| `scripts/lib/xlsx.mjs` | node's front door: `readFileSync` + `inflateRawSync` | the CLI |
+| `readWorkbookFromBytes()` | the browser's front door: `DecompressionStream('deflate-raw')` | the app |
+| `src/lib/snapshotRules.js` | `buildSnapshot(wb, refs)` — **all** the reading rules, pure | both |
+| `scripts/import-snapshot.mjs` | now only the filesystem and the report | — |
+| `src/lib/importSnapshot.js` | read → stage → commit, against Postgres | the app |
+
+Inflation is the only step that genuinely differs between the two platforms (node's is
+synchronous, the browser's is not), so it is injected and everything downstream is
+shared. `readWorkbook(path)` kept its synchronous signature, so the delivery-tracker
+and audit importers needed no changes at all.
+
+**Verified rather than assumed.** The refactored CLI importer was run against the
+2026-09-28 workbook and diffed against the committed output: the three generated
+modules are **byte-identical except for three banner comments** that were reworded on
+purpose. Then the browser front door was run against the 2026-10-05 workbook and
+compared sheet by sheet with the node one — identical on all nine sheets. A third check
+parses the column lists out of `import_commit` in `schema.sql` and compares them to the
+row mappers in `importSnapshot.js`: 32/10/18/14/14 columns, all five matching.
+
+#### Why the import is staged rather than written directly
+
+A browser cannot wrap "delete the inventory" and "insert the new inventory" in one
+transaction. A dropped connection between the two leaves the warehouse with an **empty
+inventory table** — a dashboard full of zeroes that reads as a catastrophic stock-out
+rather than as a failed upload. So:
+
+1. **Read** — the workbook is parsed in the browser. Nothing is written. Every
+   complaint the reader has about the file is shown to the person who can judge it.
+2. **Stage** — the parsed rows go into `import_rows` in chunks of 200, under a new
+   `import_batches` row. Still nothing live.
+3. **Commit** — one RPC. `import_commit(uuid)` is plpgsql, so it runs inside a single
+   implicit transaction: either all five tables are replaced or nothing changes.
+
+The split also puts a preview between the file and the damage, which matters more than
+the atomicity does. Most import mistakes are not crashes — they are a misread column
+that imports perfectly and quietly halves the valuation. Those only show up against the
+current data, which is why the before/after comparison is the largest thing on the page.
+
+#### New in the database (`supabase/migrations/2026-10-06_in_app_import.sql`)
+
+- `dataset_meta` — key/value; `snapshot_date` and `snapshot_source`. Read by everyone
+  signed in, written only by an admin.
+- `import_batches` / `import_rows` — the staging workbench and the import history.
+  Admin-only end to end.
+- `import_commit(p_batch uuid)` — `security definer`, `is_admin()` on the first line,
+  and a backstop that **refuses a payload with zero inventory rows** before reaching
+  any destructive statement.
+
+All of it is replayed in `schema.sql` per the standing rule, with explicit `grant`s
+rather than relying on Supabase's default privileges.
+
+**The foreign-key problem, and what it does about it.** `movements`, `reservations`,
+`purchase_requests`, `material_requests` and `approvals` all reference `inventory(id)`,
+and those ids are regenerated on every import — they are the workbook's row order, not
+a stable identity. So the function nulls the links, swaps the stock, then **re-makes
+them by item code**, which is the identity that survives a re-import. `approvals`
+carries no item code of its own, so its link is cleared and cannot be restored; that is
+stated in the comment rather than hidden.
+
+#### `TODAY` is no longer a line in a source file
+
+Every "days since last movement" figure, and every ledger `day_offset`, is measured
+from the snapshot date — which until now was `export const TODAY = new Date('2026-09-28…')`
+in `src/lib/format.js`, updated by hand after each import. An administrator importing
+from the browser cannot edit that. So the date now lives in `dataset_meta`, `hydrate()`
+reads it **before the rebuilds** (every one of them measures against it) and calls
+`setToday()`, and the literal stays only as the fallback for a database without the row.
+
+`TODAY` is **mutated, never reassigned** — `TODAY.setTime(...)` — for exactly the reason
+the arrays in `src/data` are filled in place: twenty-odd modules hold that same Date
+object, and rebinding the export would leave every one of them on the old date.
+
+#### The guard that the first browser run earned
+
+The first live run of the page was against a session with no database connection. It
+parsed fine and produced **763 lines worth ₱136,013 instead of ₱102.7M, with the trade
+column blank on every row** — and looked like a complete success. The cause is that
+several columns are not in the workbook at all: unit price, condition class and bin
+address are carried forward from the current data, and trade / item group / material
+type come from the item master. With neither source loaded, all of them arrive empty.
+
+That is now a **hard block**: in the page (the Apply button is disabled, with both
+reasons spelled out) and again inside `stageSnapshot`, which throws — because a
+disabled button is a courtesy and not a rule.
+
+#### What the 2026-10-05 workbook says
+
+Read, but **not applied** — the migration has to be run first. Merged layout, and for
+the first time since 09-21 the ownership column passes all three trust gates, so it is
+used. **Zero warnings** — the corruption that made 09-28 fall back to Project Origin
+has been fixed at source. 763 inventory lines (₱102.7M, 479,037 units), 303 ledger rows,
+251 / 379 / 362 safekeeping rows; its own location sheet places 733 lines; 22 lines
+unpriced; 3 undated ledger rows dropped.
+
+#### Also
+
+- `Import Data` in the sidebar, locked (🔒) for every role but admin — the same
+  treatment Users and Settings get. The real enforcement is RLS, not the nav list.
+- A new `upload` icon: a sheet with an arrow going *into* it, not a cloud.
+- Settings → Data source now names the snapshot the live data is.
+- Page CSS under `.imp-`, following the Audit tab's rule — one headline panel, then an
+  asymmetric pair, never a grid of equal tiles. Two layout bugs were caught and fixed
+  during verification: a two-column grid whose markup only filled one track (which
+  crushed the snapshot date into a wrap), and two hand-written tables missing
+  `.table-wrap`, which pushed the whole page sideways by 86px at phone width.
+
+**Not done, and it is the next step.**
+`supabase/migrations/2026-10-06_in_app_import.sql` has **not been run** — there is no
+local Postgres here and this session has no admin credentials for the project. Until
+`schema.sql` is re-run in the Supabase SQL editor, the page parses a workbook correctly
+and then reports that the database is not up to date for imports.

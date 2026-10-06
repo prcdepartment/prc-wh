@@ -2619,3 +2619,163 @@ table.data td .au-wrap { max-width: 460px; }
   .au-stat { border-left: 0; }
   .au-stat + .au-stat { border-top: 1px solid var(--border); }
 }
+
+/* ============================================================
+   IMPORT DATA  (src/pages/ImportData.jsx)
+
+   A page that is read before it is clicked. Replacing the warehouse's own figures is
+   the most consequential thing any screen here does, so the layout is a linear
+   argument — what the live data is, what the file says, what would change, and only
+   then the button — rather than a dashboard of controls. The type is wider and the
+   prose longer than anywhere else in the app for the same reason.
+   ============================================================ */
+
+/* Paragraph measure. Capped near 72ch: the explanations on this page are meant to be
+   read, and a full-width line of 13px text at 1600px is not. */
+.imp-prose {
+  max-width: 72ch; margin: 0 0 10px; font-size: 13px; line-height: 1.65; color: var(--text-muted);
+}
+.imp-prose:last-child { margin-bottom: 0; }
+.imp-prose b { color: var(--text); font-weight: 700; }
+.imp-prose code {
+  font-size: 12px; padding: 1px 5px; border-radius: 5px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.imp-prose-sm { font-size: 12px; }
+
+/* ---- live data ---- */
+.imp-live { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.imp-live-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.imp-live-value {
+  font-size: 26px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.15;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.imp-live-note { font-size: 12px; margin-top: 2px; max-width: 46ch; line-height: 1.5; }
+.imp-live-counts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 520px; }
+
+/* ---- drop zone ----
+   Deliberately large and deliberately the only thing on screen at this step. It is
+   also the one control on the page that cannot do any harm, which is why it gets the
+   dashed, inviting treatment the destructive button below does not. */
+.imp-drop {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 44px 28px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--border-strong); border-radius: 16px;
+  background: var(--surface); color: var(--text-muted);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.imp-drop:hover, .imp-drop:focus-visible { border-color: var(--brand-red); color: var(--text); }
+.imp-drop.over { border-color: var(--brand-red); background: var(--brand-red-light); color: var(--text); }
+.imp-drop.busy { cursor: progress; border-style: solid; }
+.imp-drop-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.imp-drop-note { font-size: 12px; line-height: 1.6; max-width: 62ch; }
+.imp-drop-note code { font-size: 11.5px; }
+
+/* ---- the headline panel ----
+   Same shape as the Audit tab's hero and for the same reason: one statement with its
+   evidence beside it, supporting figures on a strip underneath. Not a grid of equal
+   tiles — the line count and the valuation are what this decision turns on, and the
+   four figures below them are context. */
+/* ONE column, not two. The hero has exactly two children — the statement and the
+   strip under it — and the date-beside-sentence split inside the statement is done
+   by flex below, because the date wants to be its natural width rather than a share
+   of the page. A two-column grid here put the whole statement in the first track and
+   left the second empty, which squeezed a 30px date into 334px and wrapped it. */
+.imp-hero {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface) 46%), var(--surface);
+  border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+}
+.imp-hero::before {
+  content: ''; grid-column: 1 / -1; height: 3px;
+  background: linear-gradient(90deg, var(--brand-red), var(--brand-red-dark) 55%, transparent);
+}
+.imp-hero-focus { display: flex; align-items: center; gap: 22px; padding: 22px 24px 24px; min-width: 0; }
+/* The date is the subject of this panel and never compresses — it is the one figure
+   that must be legible from across a desk before anything is applied. */
+.imp-hero-date { flex: 0 0 auto; max-width: 300px; }
+.imp-hero-day {
+  font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: var(--text); margin-top: 2px;
+  white-space: nowrap;
+}
+.imp-hero-file {
+  font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.imp-hero-say { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px;
+  border-left: 1px solid var(--border); padding-left: 22px; }
+.imp-hero-title { font-size: 23px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.25; color: var(--text); }
+.imp-hero-note { font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-width: 70ch; }
+.imp-hero-note b { color: var(--text); font-weight: 700; }
+.imp-hero-strip {
+  grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border); background: var(--surface-2);
+}
+
+/* ---- deltas ---- */
+.imp-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 11.5px; font-weight: 700; }
+.imp-delta.up { color: var(--green); }
+.imp-delta.down { color: var(--brand-red); }
+
+/* ---- warnings ----
+   Not red. These are complaints about the SOURCE workbook, and the import carried on
+   despite them — amber says "read this before you trust the figures", which is true,
+   where red would say "this failed", which is not. */
+.imp-warn { border-color: var(--orange-soft); }
+.imp-warnlist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.imp-warnlist li { font-size: 12.5px; line-height: 1.6; color: var(--text); max-width: 86ch; }
+
+/* ---- what changes ---- */
+.imp-dest td { vertical-align: top; }
+.imp-dest-note { font-size: 11.5px; margin-top: 2px; line-height: 1.4; }
+
+.imp-facts { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.imp-facts > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.imp-facts dt {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.imp-facts dd { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text); }
+.imp-facts dd .muted { font-size: 12px; }
+
+/* ---- apply ---- */
+.imp-apply { border-color: var(--border-strong); }
+.imp-busy { display: flex; flex-direction: column; gap: 8px; }
+.imp-busy-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.imp-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; max-width: 420px; }
+.imp-bar > span { display: block; height: 100%; background: var(--brand-red); transition: width 0.2s; }
+.imp-spinner {
+  width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--border-strong); border-top-color: var(--brand-red);
+  animation: imp-spin 0.7s linear infinite;
+}
+@keyframes imp-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .imp-spinner { animation-duration: 2.4s; } }
+
+.imp-hist-file { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  /* The sentence beside the date needs about 44 characters to stay readable; below
+     this the two stack rather than the sentence wrapping every three words. */
+  .imp-hero-say { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: 16px; }
+  .imp-hero-focus { flex-direction: column; align-items: stretch; gap: 16px; }
+  .imp-hero-date { max-width: none; }
+}
+@media (max-width: 760px) {
+  .imp-hero-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .imp-hero-focus { padding: 18px; }
+  .imp-hero-title { font-size: 19px; }
+  .imp-live-counts { justify-content: flex-start; }
+  .imp-facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .imp-drop { padding: 32px 18px; }
+}
+@media (max-width: 520px) {
+  .imp-hero-strip { grid-template-columns: minmax(0, 1fr); }
+}
+/* A blocked import is the one thing on this page that IS a failure state, so unlike
+   .imp-warn it gets the brand red. */
+.imp-block { border-color: var(--brand-red-soft); }

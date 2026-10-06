@@ -19,7 +19,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dataUrl = (f) => new URL(`file://${join(root, 'private-data', f).replace(/\\/g, '/')}`).href
 const srcUrl = (f) => new URL(`file://${join(root, 'src', 'data', f).replace(/\\/g, '/')}`).href
 
-const { inventory } = await import(dataUrl('inventory.js'))
+const { inventory, SNAPSHOT_DATE } = await import(dataUrl('inventory.js'))
 const { LEDGER } = await import(dataUrl('ledger.js'))
 const { SOH_ROWS, INCOMING_ROWS, OUTGOING_ROWS } = await import(dataUrl('safekeepingSheets.js'))
 const { DELIVERY_TRACKER_ROWS } = await import(dataUrl('deliveryTrackerSheet.js'))
@@ -98,6 +98,22 @@ add(
     'code'
   )
 )
+
+// ---- dataset_meta --------------------------------------------------------
+// WHICH SNAPSHOT THIS SEED IS. The app's whole date model is relative to it — every
+// ledger day_offset and every last_movement_offset counts backwards from here — and
+// since 2026-10-06 the app reads it from the database rather than from a constant in
+// src/lib/format.js, so that an in-app import can move it without a code change.
+//
+// It therefore has to be part of the seed. Without this, re-seeding from a newer
+// workbook would load the new rows and leave the app measuring them against the
+// PREVIOUS month's date, which silently shifts every "days since" figure on the site.
+// `do update` rather than `do nothing`, for exactly that reason.
+add(`-- dataset_meta: the snapshot these seeds are.
+insert into public.dataset_meta (key, value, updated_at) values
+  ('snapshot_date', ${q(SNAPSHOT_DATE)}, now()),
+  ('snapshot_source', 'seeded from /private-data (npm run seed)', now())
+on conflict (key) do update set value = excluded.value, updated_at = now();`)
 
 // ---- inventory -----------------------------------------------------------
 add(

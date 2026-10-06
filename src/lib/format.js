@@ -13,13 +13,31 @@ export const compact = (n) =>
 
 export const pct = (n) => `${(n || 0).toFixed(1)}%`
 
-// Base date for the prototype: the snapshot date of the current source workbook, which
-// is also the base for every `off` in the ledger and for lastMovementOffset on a stock
-// line. It MUST match SNAPSHOT_DATE in private-data/inventory.js — the September
-// workbook's own "As of" date, which is also its latest recorded release, so no
-// movement on record ever lands on a future date.
-// Update this whenever a new snapshot is imported (npm run import).
+// Base date for the dataset: the snapshot date of the source workbook the live data
+// came from. It is the base for every `off` in the ledger and for lastMovementOffset
+// on a stock line, so it MUST match the workbook's own "As of" date — which is also
+// its latest recorded release, so no movement on record ever lands on a future date.
+//
+// THE DATABASE IS THE AUTHORITY, NOT THIS LINE. src/lib/hydrate.js reads
+// dataset_meta.snapshot_date at sign-in and calls setToday() below, because an
+// administrator can now replace the whole dataset from the browser (Import Data) and
+// the date has to move with the data — it cannot wait for a developer to edit a source
+// file and redeploy. The literal here is only the fallback for a database that has no
+// dataset_meta row yet (one created before 2026-10-06 and never brought up to date).
+//
+// It is a MUTABLE Date that is never reassigned, for the same reason the arrays in
+// src/data are filled in place: twenty-odd modules hold this exact object, and
+// replacing the binding would leave every one of them pointing at the old date.
 export const TODAY = new Date('2026-09-28T00:00:00')
+
+/** Move the dataset's base date. `iso` is 'YYYY-MM-DD'; anything else is ignored. */
+export const setToday = (iso) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso ?? ''))) return false
+  const next = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(next.getTime())) return false
+  TODAY.setTime(next.getTime())
+  return true
+}
 
 // 'YYYY-MM-DD' from a Date's LOCAL parts, for date-input values. Not
 // toISOString().slice(0,10) — that converts to UTC first, so a local-midnight date in any

@@ -134,6 +134,12 @@ export const NAV = [
   // procurement, warehouse, developers, future administrators — needs to read it.
   { to: '/process-flow', icon: 'flow', label: 'Process Flow' },
   { to: '/users', icon: 'users', label: 'Users', lockedFor: ['warehouse', 'procurement', 'site', 'management'] },
+  // Replaces the whole warehouse dataset from a monthly workbook. Shown to everyone
+  // but locked for everyone except an admin, the same way Users and Settings are —
+  // the lock is the honest signal that the capability exists and is not theirs,
+  // which is better than a menu that silently differs between two people's screens.
+  // The real enforcement is the RLS policy on the import tables, not this list.
+  { to: '/import', icon: 'upload', label: 'Import Data', lockedFor: ['warehouse', 'procurement', 'site', 'management'] },
   { to: '/settings', icon: 'settings', label: 'Settings', lockedFor: ['warehouse', 'procurement', 'site', 'management'] },
 ]
 export const isLocked = (item, role) => Boolean(item.lockedFor?.includes(role))

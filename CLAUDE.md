@@ -191,6 +191,19 @@ reconciled against that report's own rendered numbers** (unfiltered and under ea
 Project Type split) before any of it was drawn — see the 2026-09-21 changelog entry for
 the reconciliation table and for the one visual that deliberately does not match.
 
+## Import Data's layout rule (2026-10-07)
+
+**One screen, no page scroll, no explanatory prose.** `/import` uses the house
+`.page-fit` shell (same as the Inventory masterlist): a fixed-height flex column with
+exactly ONE elastic row, `.imp-cols`, holding two cards that scroll internally.
+Everything else is `flex-shrink: 0`. A third fixed band would eat the only row doing
+any work, so anything new goes inside one of the two scrollers.
+
+The page answers one question — apply this workbook or not — so it carries only the
+snapshot date, the new figures against the current ones, the reader's warnings, the
+per-table before/after, the rows, and the button. **Adding a sentence means removing
+one.** The prose version is what this replaced; see the 2026-10-07 changelog entry.
+
 **Audit's layout rule (2026-10-05): no grids of equal tiles.** Each sub-view opens with
 one headline panel (`.au-hero`) — a ring and a verdict, the detail that explains it
 beside, supporting figures on a hairline-separated strip underneath — and everything

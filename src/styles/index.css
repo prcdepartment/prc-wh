@@ -2623,159 +2623,188 @@ table.data td .au-wrap { max-width: 460px; }
 /* ============================================================
    IMPORT DATA  (src/pages/ImportData.jsx)
 
-   A page that is read before it is clicked. Replacing the warehouse's own figures is
-   the most consequential thing any screen here does, so the layout is a linear
-   argument — what the live data is, what the file says, what would change, and only
-   then the button — rather than a dashboard of controls. The type is wider and the
-   prose longer than anywhere else in the app for the same reason.
+   ONE SCREEN, NO PAGE SCROLL. The page is a `.page-fit` column: fixed-height
+   elements top and bottom, and exactly one elastic row (`.imp-cols`) holding the two
+   cards that scroll internally. Anything added here must either be flex-shrink: 0 and
+   tiny, or go inside one of those two scrollers — a third fixed band eats the only
+   row that was doing any work.
+
+   There is also no explanatory prose anywhere on this page, by design; see the header
+   comment in ImportData.jsx. The type here is small and dense because every element
+   is a figure or a control, not something to read.
    ============================================================ */
 
-/* Paragraph measure. Capped near 72ch: the explanations on this page are meant to be
-   read, and a full-width line of 13px text at 1600px is not. */
-.imp-prose {
-  max-width: 72ch; margin: 0 0 10px; font-size: 13px; line-height: 1.65; color: var(--text-muted);
-}
-.imp-prose:last-child { margin-bottom: 0; }
-.imp-prose b { color: var(--text); font-weight: 700; }
-.imp-prose code {
-  font-size: 12px; padding: 1px 5px; border-radius: 5px;
-  background: var(--surface-2); border: 1px solid var(--border);
-}
-.imp-prose-sm { font-size: 12px; }
+.imp-page { gap: 10px; }
 
-/* ---- live data ---- */
-.imp-live { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
-.imp-live-label {
-  font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--text-muted);
+/* ---- the one elastic row ----
+   7:5 by default (drop zone beside history), 5:7 when a workbook is open so the row
+   table gets the width its seven columns need. */
+.imp-cols {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 10px;
 }
-.imp-live-value {
-  font-size: 26px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.15;
-  font-variant-numeric: tabular-nums; color: var(--text);
+/* 4:8 rather than 5:7 — the four-column "what changes" table needs about 330px and
+   the seven-column row table needs every pixel it can get, or Bin clips off the end. */
+.imp-cols.narrow-left { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); }
+
+/* ---- single-line status bands ---- */
+.imp-bar {
+  flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm); min-width: 0;
 }
-.imp-live-note { font-size: 12px; margin-top: 2px; max-width: 46ch; line-height: 1.5; }
-.imp-live-counts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 520px; }
+.imp-bar.ok { border-color: var(--green-soft); }
+.imp-bar.ok > svg { color: var(--green); flex-shrink: 0; }
+.imp-bar-date { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; flex-shrink: 0; }
+/* The chips take the slack so the badge stays pinned right. They clip rather than
+   wrap: a second row of chips would make this band two lines tall. */
+.imp-bar-chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; }
+.imp-bar-chips .chip { white-space: nowrap; flex-shrink: 0; }
+
+.imp-alert {
+  flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-radius: var(--radius); font-size: 12.5px; line-height: 1.45;
+  border: 1px solid var(--brand-red-soft); background: var(--brand-red-light); color: var(--text);
+}
+:root[data-theme='dark'] .imp-alert { background: transparent; }
+.imp-alert > svg { color: var(--brand-red); flex-shrink: 0; }
+.imp-alert > span { flex: 1; min-width: 0; }
 
 /* ---- drop zone ----
-   Deliberately large and deliberately the only thing on screen at this step. It is
-   also the one control on the page that cannot do any harm, which is why it gets the
-   dashed, inviting treatment the destructive button below does not. */
+   Fills its grid cell rather than taking a fixed height, so the one thing that can
+   absorb a taller or shorter window is the control that does not mind either. */
 .imp-drop {
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-  padding: 44px 28px; text-align: center; cursor: pointer;
-  border: 2px dashed var(--border-strong); border-radius: 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  text-align: center; cursor: pointer; min-height: 0;
+  border: 2px dashed var(--border-strong); border-radius: var(--radius);
   background: var(--surface); color: var(--text-muted);
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 .imp-drop:hover, .imp-drop:focus-visible { border-color: var(--brand-red); color: var(--text); }
 .imp-drop.over { border-color: var(--brand-red); background: var(--brand-red-light); color: var(--text); }
 .imp-drop.busy { cursor: progress; border-style: solid; }
-.imp-drop-title { font-size: 15px; font-weight: 700; color: var(--text); }
-.imp-drop-note { font-size: 12px; line-height: 1.6; max-width: 62ch; }
-.imp-drop-note code { font-size: 11.5px; }
+.imp-drop-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.imp-drop-spec {
+  font-size: 11.5px; padding: 4px 10px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-faint);
+}
 
-/* ---- the headline panel ----
-   Same shape as the Audit tab's hero and for the same reason: one statement with its
-   evidence beside it, supporting figures on a strip underneath. Not a grid of equal
-   tiles — the line count and the valuation are what this decision turns on, and the
-   four figures below them are context. */
-/* ONE column, not two. The hero has exactly two children — the statement and the
-   strip under it — and the date-beside-sentence split inside the statement is done
-   by flex below, because the date wants to be its natural width rather than a share
-   of the page. A two-column grid here put the whole statement in the first track and
-   left the second empty, which squeezed a 30px date into 334px and wrapped it. */
+/* ---- headline panel ----
+   The Audit tab's shape, flattened: a statement with its evidence beside it and four
+   supporting figures on a hairline strip under it. One column, because the split
+   inside the statement is flex — the date wants its natural width, not a share of
+   the page. Deliberately short: this band and the apply bar are the only fixed
+   heights above and below the elastic row. */
 .imp-hero {
-  display: grid; grid-template-columns: minmax(0, 1fr);
+  flex-shrink: 0;
   background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface) 46%), var(--surface);
-  border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
 }
 .imp-hero::before {
-  content: ''; grid-column: 1 / -1; height: 3px;
+  content: ''; display: block; height: 3px;
   background: linear-gradient(90deg, var(--brand-red), var(--brand-red-dark) 55%, transparent);
 }
-.imp-hero-focus { display: flex; align-items: center; gap: 22px; padding: 22px 24px 24px; min-width: 0; }
-/* The date is the subject of this panel and never compresses — it is the one figure
-   that must be legible from across a desk before anything is applied. */
-.imp-hero-date { flex: 0 0 auto; max-width: 300px; }
+.imp-hero-focus { display: flex; align-items: center; gap: 18px; padding: 12px 16px; min-width: 0; }
+.imp-hero-date { flex: 0 0 auto; }
 .imp-hero-day {
-  font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1;
-  font-variant-numeric: tabular-nums; color: var(--text); margin-top: 2px;
-  white-space: nowrap;
+  font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1;
+  color: var(--text); white-space: nowrap;
+}
+.imp-hero-say {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  border-left: 1px solid var(--border); padding-left: 18px;
+}
+.imp-hero-title { font-size: 19px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.25; color: var(--text); }
+.imp-hero-note {
+  font-size: 12px; line-height: 1.5; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .imp-hero-file {
-  font-size: 11px; color: var(--text-faint); margin-top: 4px; line-height: 1.4;
-  overflow-wrap: anywhere;
+  font-size: 11px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.imp-hero-say { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px;
-  border-left: 1px solid var(--border); padding-left: 22px; }
-.imp-hero-title { font-size: 23px; font-weight: 800; letter-spacing: -0.015em; line-height: 1.25; color: var(--text); }
-.imp-hero-note { font-size: 12.5px; line-height: 1.6; color: var(--text-muted); max-width: 70ch; }
-.imp-hero-note b { color: var(--text); font-weight: 700; }
 .imp-hero-strip {
-  grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--border); background: var(--surface-2);
 }
+/* Tighter than the Audit tab's: four stats here sit under a headline that is already
+   three lines, and the whole band has to stay out of the elastic row's way. */
+.imp-hero-strip .au-stat { padding: 8px 16px; }
+.imp-hero-strip .au-stat-value { font-size: 19px; }
+.imp-hero-strip .au-stat-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- deltas ---- */
-.imp-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 11.5px; font-weight: 700; }
+.imp-delta { display: inline-flex; align-items: center; gap: 1px; font-size: 11px; font-weight: 700; }
 .imp-delta.up { color: var(--green); }
 .imp-delta.down { color: var(--brand-red); }
 
-/* ---- warnings ----
-   Not red. These are complaints about the SOURCE workbook, and the import carried on
-   despite them — amber says "read this before you trust the figures", which is true,
-   where red would say "this failed", which is not. */
-.imp-warn { border-color: var(--orange-soft); }
-.imp-warnlist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
-.imp-warnlist li { font-size: 12.5px; line-height: 1.6; color: var(--text); max-width: 86ch; }
+/* ---- the two tables ----
+   Denser than the app default: these are for scanning, and every row that fits is a
+   row nobody has to scroll to. */
+.imp-dest tbody td, .imp-preview tbody td { padding: 7px 10px; }
+.imp-dest tbody tr, .imp-preview tbody tr { cursor: default; }
+.imp-preview { font-size: 12px; }
+.imp-preview .trunc { max-width: 170px; }
 
-/* ---- what changes ---- */
-.imp-dest td { vertical-align: top; }
-.imp-dest-note { font-size: 11.5px; margin-top: 2px; line-height: 1.4; }
-
-.imp-facts { margin: 0; display: flex; flex-direction: column; gap: 10px; }
-.imp-facts > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; }
-.imp-facts dt {
-  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-muted);
+/* Amber, not red: a warning is a complaint about the SOURCE workbook that the reader
+   carried on past, where red would say the import failed. */
+.imp-chip-warn { border-color: var(--orange-soft); color: var(--orange); }
+.imp-warnlist {
+  margin: 0; padding: 10px 14px 12px 28px; display: flex; flex-direction: column; gap: 7px;
+  border-top: 1px solid var(--border); background: var(--orange-weak);
 }
-.imp-facts dd { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text); }
-.imp-facts dd .muted { font-size: 12px; }
+:root[data-theme='dark'] .imp-warnlist { background: transparent; }
+.imp-warnlist li { font-size: 11.5px; line-height: 1.5; color: var(--text); }
 
-/* ---- apply ---- */
-.imp-apply { border-color: var(--border-strong); }
-.imp-busy { display: flex; flex-direction: column; gap: 8px; }
-.imp-busy-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.imp-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; max-width: 420px; }
-.imp-bar > span { display: block; height: 100%; background: var(--brand-red); transition: width 0.2s; }
+/* ---- apply bar ---- */
+.imp-applybar {
+  flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  font-size: 12.5px; min-width: 0;
+}
+.imp-ask { flex: 1; min-width: 0; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+.imp-ask.danger-text { color: var(--brand-red); }
+.imp-applybar > .muted { flex: 1; min-width: 0; }
+.imp-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.imp-bar-track {
+  flex: 1; max-width: 320px; height: 6px; border-radius: 3px;
+  background: var(--surface-2); overflow: hidden;
+}
+.imp-bar-track > span { display: block; height: 100%; background: var(--brand-red); transition: width 0.2s; }
 .imp-spinner {
   width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0;
   border: 2px solid var(--border-strong); border-top-color: var(--brand-red);
   animation: imp-spin 0.7s linear infinite;
 }
+.imp-spinner.lg { width: 30px; height: 30px; border-width: 3px; }
 @keyframes imp-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .imp-spinner { animation-duration: 2.4s; } }
 
-.imp-hist-file { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---- not an admin ---- */
+.imp-denied {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  text-align: center; color: var(--text-muted); padding: 24px;
+}
+.imp-denied > svg { color: var(--brand-red); }
+.imp-denied b { color: var(--text); font-size: 15px; }
 
-@media (max-width: 900px) {
-  /* The sentence beside the date needs about 44 characters to stay readable; below
-     this the two stack rather than the sentence wrapping every three words. */
-  .imp-hero-say { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: 16px; }
-  .imp-hero-focus { flex-direction: column; align-items: stretch; gap: 16px; }
-  .imp-hero-date { max-width: none; }
-}
-@media (max-width: 760px) {
+/* Below tablet the two cards cannot share a row and still show a seven-column table
+   legibly, so the shell stops pinning to the viewport and the page scrolls normally —
+   a phone has no "one screen" to fit in the first place. */
+@media (max-width: 1000px) {
+  .imp-page { height: auto; min-height: 0; }
+  .content:has(.imp-page) { overflow: visible; padding-bottom: 48px; }
+  .imp-cols, .imp-cols.narrow-left { grid-template-columns: minmax(0, 1fr); }
+  .imp-cols .inv-card { max-height: 420px; }
+  .imp-drop { min-height: 220px; }
   .imp-hero-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .imp-hero-focus { padding: 18px; }
-  .imp-hero-title { font-size: 19px; }
-  .imp-live-counts { justify-content: flex-start; }
-  .imp-facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .imp-drop { padding: 32px 18px; }
+  .imp-bar, .imp-applybar { flex-wrap: wrap; }
+  .imp-bar-chips { order: 3; flex-basis: 100%; flex-wrap: wrap; }
 }
-@media (max-width: 520px) {
+@media (max-width: 680px) {
+  .imp-hero-focus { flex-direction: column; align-items: stretch; gap: 10px; }
+  .imp-hero-say { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: 10px; }
+  .imp-hero-note { white-space: normal; }
   .imp-hero-strip { grid-template-columns: minmax(0, 1fr); }
 }
-/* A blocked import is the one thing on this page that IS a failure state, so unlike
-   .imp-warn it gets the brand red. */
-.imp-block { border-color: var(--brand-red-soft); }

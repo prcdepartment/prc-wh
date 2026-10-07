@@ -4428,3 +4428,79 @@ unpriced; 3 undated ledger rows dropped.
 local Postgres here and this session has no admin credentials for the project. Until
 `schema.sql` is re-run in the Supabase SQL editor, the page parses a workbook correctly
 and then reports that the database is not up to date for imports.
+
+---
+
+### 2026-10-07 — Session: Import Data fits one screen, and stops explaining itself
+
+**What was asked.** "No hint descriptions. Everything is shown in desktop view without
+scrolling."
+
+**What was wrong with yesterday's page.** It was a tutorial. Every panel carried a
+paragraph saying what the panel was for — why the import is staged, what a warning
+means, what to do if the database is not ready — and a whole card at the bottom headed
+*If something looks wrong*. All of it true, none of it needed twice, and together it
+pushed the thing you actually came to look at (the rows, and the Apply button) two
+screens below the fold. You cannot judge an import you have to scroll to see.
+
+#### The rule now, written into both files
+
+**One screen, no page scroll, and no explanatory prose.** The page answers exactly one
+question — apply this workbook or not — so what survives is the snapshot date, the new
+figures against the current ones, anything the reader distrusted about the file, the
+per-table before/after, the rows themselves, and the button. Adding a sentence here
+means removing one.
+
+#### How it holds its height
+
+Reused `.page-fit`, the house shell already used by the Inventory masterlist (see the
+comment above it in `index.css`): a fixed-height flex column, `100vh - topbar - 48px`,
+with `.content:has(.page-fit)` set to `overflow: hidden`. Everything is `flex-shrink: 0`
+except **one elastic row**, `.imp-cols`, holding two cards that scroll internally.
+
+```
+┌ hero — date | headline + deltas | 4-stat strip ──────────┐  165px  fixed
+┌ alert — only when blocked ───────────────────────────────┐   38px  fixed
+┌ WHAT CHANGES (4fr) ────┬ STOCK LINES AS STORED (8fr) ────┐
+│ 5 destinations, now→   │ all 763 rows, 7 columns         │  elastic, scrolls
+│ then the warnings      │                                 │  inside
+└────────────────────────┴─────────────────────────────────┘
+┌ apply bar — consequence left, buttons right ─────────────┐   58px  fixed
+```
+
+Measured at three desktop sizes with the October workbook open, vertical **and**
+horizontal page scroll both zero in each: 1366×768 gives 10 visible stock rows,
+1440×900 gives 14, 1920×1080 gives 20. The elastic row absorbs the whole difference.
+Below 1000px the shell releases the viewport and the page scrolls normally — a phone has
+no "one screen" to fit into, and two cards cannot share a row and still show seven
+columns legibly.
+
+#### What was cut
+
+The *If something looks wrong* card; the *Read from this file* card (its six facts were
+five duplicates of figures already in the strip plus the areas list); every `.imp-prose`
+paragraph; every descriptive `sub` under a card title; the per-row descriptions in the
+destinations table; the page's own subtitle. The restricted-role notice is now one line.
+
+Nothing load-bearing went: the three-step read → stage → commit flow, the confirmation
+step, the blocker guard and the warnings are all still there, just stated rather than
+explained. The warnings now sit **inside** the left card under the destinations table —
+which is also what fills that column's empty space — with an amber count chip in the
+card head.
+
+The row preview got better by shrinking. It was eight paginated rows through
+`DataTable`; it is now every row in one internally scrolled table, so you can check any
+line against the workbook instead of only the first eight, and the pagination chrome is
+gone.
+
+#### Verified
+
+The October 5 workbook (0 warnings) and the September 28 one (3 warnings, the corrupt
+ownership column) both loaded in the browser and laid out correctly, in light and dark,
+at 1366/1440/1920 wide and at 900 (tablet fallback). Two fixes came out of it: the
+destinations/preview split moved from 5:7 to **4:8**, because at 5:7 the Bin column
+clipped off the end of the row table, and `.imp-preview .trunc` came down to 170px.
+
+**Still not done:** `supabase/migrations/2026-10-06_in_app_import.sql` has not been run.
+Until `schema.sql` is re-run in the Supabase SQL editor, the page parses a workbook
+correctly and then reports that the database is not ready.
